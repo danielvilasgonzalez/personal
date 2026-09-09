@@ -1,0 +1,68 @@
+Function name,Function type,Param 1,Param 2,Param 3,Param 4,Param 5,Param 6,var,fg num,source
+1_sharks_depth_gfisher,6,35.969,379.609,39.953,28.47,1,NA,depth,1,gfisher
+2_pelagic piscivores_depth_gfisher,9,-60.528,-55.963,-55.945,174.642,NA,NA,depth,2,gfisher
+3_snappers_depth_rsn,6,94.962,1054.082,115.855,70.11,1,NA,depth,3,rsn
+4_gag 0_depth_sigmoid,10,9.144,132.59,24.717,0,-0.176,0.991,depth,5,gfisher
+5_gag 1_depth_gfisher,10,9.144,132.59,24.717,0,-0.176,0.991,depth,5,gfisher
+6_gag 2_depth_gfisher,6,23.41,197.362,16.062,19.251,0.996,NA,depth,6,gfisher
+7_gag 3_depth_gfisher,10,9.144,132.59,-27.883,0,-0.021,0.996,depth,7,gfisher
+8_gag 4_depth_gfisher,10,9.144,132.59,-27.887,0,-0.011,0.987,depth,8,gfisher
+9_gag 5+_depth_gfisher,10,9.144,132.59,36.406,0,0.076,0.996,depth,9,gfisher
+10_red grouper 0_depth_sigmoid,10,0,118,3.535,0,-0.108,1,depth,11,gfisher
+11_red grouper 1_depth_gfisher,10,0,118,3.535,0,-0.108,1,depth,11,gfisher
+12_red grouper 2_depth_gfisher,10,0,118,-11.277,0,-0.061,1.018,depth,12,gfisher
+13_red grouper 3_depth_gfisher,6,28.148,319.552,35.763,13.936,1.002,NA,depth,13,gfisher
+14_red grouper 4_depth_gfisher,6,27.99,289.361,29.882,38.272,1.004,NA,depth,14,gfisher
+15_red grouper 5+_depth_gfisher,11,0,118,26.332,2.13,NA,NA,depth,15,gfisher
+16_large reef fish_depth_gfisher,9,-18.608,50.058,71.696,290.746,NA,NA,depth,16,gfisher
+17_small reef fish_depth_gfisher,11,0,180,261.232,-0.956,NA,NA,depth,17,gfisher
+18_demersal fish_depth_smp,10,4.8,113.35,-84.249,0,0.038,0.999,depth,18,smp
+19_small pelagics_depth_bfc,6,89.014,541.742,19.335,5.731,0.978,NA,depth,19,bfc
+1_sharks_DO_aqm,9,0,12,522,2269,NA,NA,DO,1,aqm
+2_pelagic piscivores_DO_aqm,9,1,14,327,1768,NA,NA,DO,2,aqm
+3_snappers_DO_aqm,9,1,11,160,270,NA,NA,DO,3,aqm
+4_gag_DO_aqm,9,1,9,149,464,NA,NA,DO,4,aqm
+10_red grouper _DO_aqm,9,1,12,197,464,NA,NA,DO,10,aqm
+16_large reef fish_DO_aqm,9,0,7,96,594,NA,NA,DO,16,aqm
+17_small reef fish_DO_aqm,9,1,9,120,392,NA,NA,DO,17,aqm
+18_demersal fish_DO_aqm,9,0,5,133,227,NA,NA,DO,18,aqm
+19_small pelagics_DO_aqm,9,0,5,102,392,NA,NA,DO,19,aqm
+19_small pelagics_salinity_aqm,9,18.94,30.31,36.25,39.38,NA,NA,salinity,19,aqm
+1_sharks_temp_gfisher,10,11.49,32.6,53.71,0,0.032,0.994,temp,1,gfisher
+2_pelagic piscivores_temp_aqm,9,11.54,22,28.03,32.23,NA,NA,temp,2,aqm
+3_snappers_temp_gfisher,10,11.49,32.6,12.534,0,-0.013,0.91,temp,3,gfisher
+4_gag_temp_normal,6,3.816,35.52,3.288,26.155,0.999,NA,temp,5,gfisher
+15_red grouper_temp_normal,6,17.703,174.422,17.182,24.742,1.001,NA,temp,15,gfisher
+16_large reef fish_temp_gfisher,6,26.992,182.37,9.482,23.821,0.994,NA,temp,16,gfisher
+17_small reef fish_temp_gfisher,6,14.115,159.793,17.844,21.815,1.006,NA,temp,17,gfisher
+18_demersal fish_temp_smp,10,14.84,31.35,19.381,0,0,0.996,temp,18,smp
+19_small pelagics_temp_bfc,6,5.469,50.604,4.651,23.032,1.014,NA,temp,19,bfc
+1_sharks_red_tide_M0,11,0,1000000,200000,4,NA,NA,red tide,1,
+2_pelagic piscivores_red_tide_M0,11,0,1000000,200000,4,NA,NA,red tide,2,
+3_snappers_red_tide_M0,11,0,1000000,200000,4,NA,NA,red tide,3,
+4_gag 0_red_tide_M0,11,0,1000000,200000,4,NA,NA,red tide,4,
+gag 1+_red_tide_M0,11,0,1000000,200000,4,NA,NA,red tide,0,
+10_red grouper 0_red_tide_M0,11,0,1000000,200000,4,NA,NA,red tide,10,
+red grouper 1+_red_tide_M0,11,0,1000000,200000,4,NA,NA,red tide,0,
+16_large reef fish_red_tide_M0,11,0,1000000,200000,4,NA,NA,red tide,16,
+17_small reef fish_red_tide_M0,11,0,1000000,200000,4,NA,NA,red tide,17,
+18_demersal fish_red_tide_M0,11,0,1000000,200000,4,NA,NA,red tide,18,
+19_small pelagics_red_tide_M0,11,0,1000000,200000,4,NA,NA,red tide,19,
+20_macro-crustaceans_red_tide_M0,11,0,1000000,200000,4,NA,NA,red tide,20,
+21_micro-crustaceans_red_tide_M0,11,0,1000000,200000,4,NA,NA,red tide,21,
+22_other invertebrates_red_tide_M0,11,0,1000000,200000,4,NA,NA,red tide,22,
+23_zooplankton_red_tide_M0,11,0,1000000,200000,4,NA,NA,red tide,23,
+1_sharks_red_tide_foraging,11,0,1000000,100000,-5,NA,NA,red tide,1,
+2_pelagic piscivores_red_tide_foraging,11,0,1000000,100000,-5,NA,NA,red tide,2,
+3_snappers_red_tide_foraging,11,0,1000000,100000,-5,NA,NA,red tide,3,
+4_gag 0_red_tide_foraging,11,0,1000000,100000,-5,NA,NA,red tide,4,
+gag 1+_red_tide_foraging,11,0,1000000,100000,-5,NA,NA,red tide,0,
+10_red grouper 0_red_tide_foraging,11,0,1000000,100000,-5,NA,NA,red tide,10,
+red grouper 1+_red_tide_foraging,11,0,1000000,100000,-5,NA,NA,red tide,0,
+16_large reef fish_red_tide_foraging,11,0,1000000,100000,-5,NA,NA,red tide,16,
+17_small reef fish_red_tide_foraging,11,0,1000000,100000,-5,NA,NA,red tide,17,
+18_demersal fish_red_tide_foraging,11,0,1000000,100000,-5,NA,NA,red tide,18,
+19_small pelagics_red_tide_foraging,11,0,1000000,100000,-5,NA,NA,red tide,19,
+20_macro-crustaceans_red_tide_foraging,11,0,1000000,100000,-5,NA,NA,red tide,20,
+21_micro-crustaceans_red_tide_foraging,11,0,1000000,100000,-5,NA,NA,red tide,21,
+22_other invertebrates_red_tide_foraging,11,0,1000000,100000,-5,NA,NA,red tide,22,
