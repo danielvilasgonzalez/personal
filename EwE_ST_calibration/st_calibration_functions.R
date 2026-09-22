@@ -208,6 +208,132 @@ plot_nll_convergence_panel <- function(ga2, primary_col, primary_label, primary_
 }
 
 
+#' @title A second GA-convergence panel: mean + median NLL (primary axis), max NLL (secondary axis).
+#' @description Companion to plot_nll_convergence_panel(), for the revised 2-panel
+#'   convergence figure: panel 1 (built with plot_nll_convergence_panel()) shows
+#'   minimum NLL + its SD; this panel shows mean and median NLL together on the SAME
+#'   primary axis (they're typically close in magnitude and directly comparable, unlike
+#'   max), with maximum NLL on a secondary axis (max can run much higher than mean/
+#'   median, especially in early generations, so it would otherwise dominate/compress
+#'   the primary axis if plotted alongside them at the same scale). Uses the exact same
+#'   linear axis-mapping mechanism as plot_nll_convergence_panel() (max_max maps
+#'   directly to the primary axis's top, 0 maps to primary_min), just with two primary
+#'   series sharing that axis instead of one.
+#' @param ga2 data.frame with columns `gen`, `mean_col`, `median_col`, `max_col`.
+#' @param mean_col Column name for the mean NLL statistic. Default "mean_LL".
+#' @param mean_label Legend label for the mean series. Default "mean NLL".
+#' @param mean_color Line/point color for the mean series.
+#' @param median_col Column name for the median NLL statistic. Default "median_LL".
+#' @param median_label Legend label for the median series. Default "median NLL".
+#' @param median_color Line/point color for the median series.
+#' @param max_col Column name for the max NLL statistic. Default "max_LL".
+#' @param max_label Legend label for the max series. Default "max NLL".
+#' @param max_color Line/point color for the max series. Default "#C0392B".
+#' @param max_max Value that maps to the TOP of the secondary (max NLL) axis -- the
+#'   axis will display exactly [0, max_max]. Default NULL = the data's own max (so the
+#'   max-NLL line's own highest point sits exactly at the axis top). Pass an explicit
+#'   value for a fixed, generation-independent scale (e.g. to keep this panel's
+#'   secondary axis consistent if you re-run with a different generation subset).
+#' @param gen_breaks Optional numeric vector of x-axis breaks. NULL (default) =
+#'   ggplot's own default breaks.
+#' @param primary_min Lower bound for the primary (mean/median) axis. Default 0.
+#' @param legend_position,legend_justification Passed straight to theme(); default
+#'   places the legend inside the panel, top-right.
+#' @return A ggplot object.
+#' @export
+plot_nll_mean_median_max_panel <- function(ga2,
+                                           mean_col = "mean_LL", mean_label = "mean NLL", mean_color = "#1B4F72",
+                                           median_col = "median_LL", median_label = "median NLL", median_color = "#8E44AD",
+                                           max_col = "max_LL", max_label = "max NLL", max_color = "#C0392B",
+                                           max_max = NULL, gen_breaks = NULL,
+                                           primary_min = 0,
+                                           legend_position = c(0.95, 0.95),
+                                           legend_justification = c(1, 1)){
+  if(!requireNamespace("ggplot2", quietly = TRUE))
+    stop("Package 'ggplot2' is required. Install it with install.packages('ggplot2').")
+  
+  mean_vals   <- ga2[[mean_col]]
+  median_vals <- ga2[[median_col]]
+  max_vals    <- ga2[[max_col]]
+  primary_range <- range(c(mean_vals, median_vals), na.rm = TRUE)
+  if(primary_min > primary_range[1])
+    message("plot_nll_mean_median_max_panel(): primary_min (", primary_min, ") is ABOVE the actual ",
+            "minimum of '", mean_col, "'/'", median_col, "' (", signif(primary_range[1], 6), ") -- the ",
+            "lowest point(s) will be clipped from view (zoomed past), not dropped from the data.")
+  max_max_actual <- if(is.null(max_max)) max(max_vals, na.rm = TRUE) else max_max
+  if(!is.null(max_max) && max_max < max(max_vals, na.rm = TRUE))
+    message("plot_nll_mean_median_max_panel(): max_max (", max_max, ") is below the actual max of '",
+            max_col, "' (", signif(max(max_vals, na.rm = TRUE), 6), ") -- the highest point(s) will be ",
+            "drawn ABOVE the top of the panel (not clipped/dropped from the data, but off the visible ",
+            "plot). Raise max_max, or pass max_max = NULL to use the data's own max.")
+  
+  # Same linear axis-mapping technique as plot_nll_convergence_panel(): max_max maps
+  # DIRECTLY to primary_top (the primary axis's own top), 0 maps to primary_min -- so
+  # sec_axis() displays exactly [0, max_max], with mean and median sharing that same
+  # primary axis untransformed (they're directly comparable, unlike max).
+  primary_top <- primary_range[2] * 1.05
+  sf   <- (primary_top - primary_min) / max_max_actual
+  offs <- primary_min
+  
+  df <- ga2
+  df$.mean       <- mean_vals
+  df$.median     <- median_vals
+  df$.max_scaled <- max_vals * sf + offs
+  
+  colors <- stats::setNames(c(mean_color, median_color, max_color), c(mean_label, median_label, max_label))
+  y_limits <- c(primary_min, primary_top)
+  
+  dropped_mean   <- sum(mean_vals < y_limits[1] | mean_vals > y_limits[2], na.rm = TRUE)
+  dropped_median <- sum(median_vals < y_limits[1] | median_vals > y_limits[2], na.rm = TRUE)
+  dropped_max    <- sum(df$.max_scaled < y_limits[1] | df$.max_scaled > y_limits[2], na.rm = TRUE)
+  if(dropped_mean > 0 || dropped_median > 0 || dropped_max > 0)
+    message("plot_nll_mean_median_max_panel(): ", dropped_mean, " '", mean_col, "', ", dropped_median,
+            " '", median_col, "', and ", dropped_max, " '", max_col, "' point(s) fall outside [",
+            signif(y_limits[1], 6), ", ", signif(y_limits[2], 6), "] and will be DROPPED (not just ",
+            "clipped from view) -- widen primary_min/primary_top or max_max if this matters.")
+  
+  p <- ggplot2::ggplot(df, ggplot2::aes(x = gen)) +
+    ggplot2::geom_line(ggplot2::aes(y = .mean, colour = mean_label),
+                       linewidth = 1, alpha = 0.7) +
+    ggplot2::geom_point(ggplot2::aes(y = .mean, colour = mean_label),
+                        size = 2, alpha = 0.7) +
+    ggplot2::geom_line(ggplot2::aes(y = .median, colour = median_label),
+                       linewidth = 1, alpha = 0.7) +
+    ggplot2::geom_point(ggplot2::aes(y = .median, colour = median_label),
+                        size = 2, alpha = 0.7) +
+    ggplot2::geom_line(ggplot2::aes(y = .max_scaled, colour = max_label),
+                       linewidth = 1, linetype = "22", alpha = 0.7) +
+    ggplot2::geom_point(ggplot2::aes(y = .max_scaled, colour = max_label),
+                        shape = 17, size = 2, alpha = 0.7) +
+    ggplot2::scale_colour_manual(values = colors, name = NULL) +
+    ggplot2::scale_y_continuous(
+      name = "mean / median NLL",
+      limits = y_limits,
+      sec.axis = ggplot2::sec_axis(~ (. - offs) / sf, name = max_label)
+    ) +
+    ggplot2::labs(x = "generation") +
+    ggplot2::theme_bw(base_size = 12) +
+    ggplot2::theme(
+      axis.title = ggplot2::element_text(face = "bold"),
+      axis.title.y.right = ggplot2::element_text(face = "bold"),
+      axis.text = ggplot2::element_text(color = "black"),
+      panel.grid.minor = ggplot2::element_blank(),
+      legend.position = legend_position,
+      legend.justification = legend_justification,
+      legend.title = ggplot2::element_blank(),
+      legend.text = ggplot2::element_text(size = 10),
+      legend.key.width = grid::unit(1.2, "cm"),
+      legend.background = ggplot2::element_blank(),
+      aspect.ratio = 1
+    ) +
+    ggplot2::guides(colour = ggplot2::guide_legend(override.aes = list(linewidth = 1, size = 3)))
+  
+  if(!is.null(gen_breaks)) p <- p + ggplot2::scale_x_continuous(breaks = gen_breaks)
+  
+  p
+}
+
+
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 # PART 1: shared Ecospace obs-vs-pred helpers + plot_obs_vs_pred()
 #
@@ -1746,7 +1872,7 @@ plot_ga_ensemble_faceted <- function(obs = NULL,
                                         color = "grey30", linewidth = 1.25, linetype = "solid")
         if(nrow(sub_obs) > 0)
           pp <- pp + ggplot2::geom_point(data = sub_obs, ggplot2::aes(x = year, y = value, shape = series),
-                                         fill = "white", color = "black", size = 1.5, stroke = 0.7)
+                                         fill = "white", color = "black", size = 2.0, stroke = 0.8)
         if(!is.null(obs_legend)){
           pp <- pp +
             ggplot2::geom_point(data = obs_legend, ggplot2::aes(x = year, y = value, shape = series),
@@ -1867,7 +1993,7 @@ plot_ga_ensemble_faceted <- function(obs = NULL,
                                         limits = fitness_limits, name = "NLL",
                                         guide = ggplot2::guide_colorbar(
                                           title.position = "top", title.hjust = 0,
-                                          barheight = grid::unit(14.65, "cm"),
+                                          barheight = grid::unit(14.8, "cm"),
                                           barwidth = grid::unit(0.55, "cm"),
                                           frame.colour = "black", frame.linewidth = 0.5,
                                           ticks = TRUE, ticks.colour = "black")) +
@@ -1891,7 +2017,7 @@ plot_ga_ensemble_faceted <- function(obs = NULL,
         # the actual alignment mechanism, not a margin on the legend plot itself
         nll_legend_plot <- (patchwork::plot_spacer() /
                               patchwork::wrap_elements(full = nll_legend_grob, clip = FALSE)) +
-          patchwork::plot_layout(heights = c(-0.11, 0.98))
+          patchwork::plot_layout(heights = c(-0.11, 0.989))
         p <- (panel_grid | nll_legend_plot) + patchwork::plot_layout(widths = c(1, 0.075))
       } else {
         message("  [note] could not extract NLL colorbar grob -- combined figure will have no NLL legend.")
@@ -2901,6 +3027,15 @@ plot_spatial_residuals <- function(residual_df, title = "", value_col = c("resid
 #' @param species_patterns Character vector of case-insensitive substrings identifying
 #'   which species to include, e.g. c("gag", "red grouper"). A raster whose filename
 #'   doesn't match ANY of these is skipped (reported in the summary, not silently).
+#' @param stanza_patterns Optional character vector of case-insensitive substrings
+#'   restricting which STANZAS within a matched species are actually plotted, matched
+#'   against the group's CONFIRMED display name (e.g. "gag 3", "red grouper 5+") from
+#'   the resolved EcospaceMap token -- not the filename-guessed stanza -- so this works
+#'   the same way whether a raster's token was auto-detected or supplied via
+#'   `manual_tokens`. NULL (default) = every stanza matching `species_patterns` is
+#'   included, unchanged from previous behavior. E.g.
+#'   `stanza_patterns = c("gag 3", "gag 4", "gag 5+", "red grouper 3", "red grouper 4",
+#'   "red grouper 5+")` keeps only the older stanzas, excluding ages 0-2.
 #' @param ens_mode One of "quantile" (default, best X% by fitness -- see
 #'   `keep_fitness_quantile`), "topN" (exactly the N best by rank -- see `top_n`), or
 #'   "aic" (Akaike-selected subset -- see `target_ess`). For "aic" mode, the predicted
@@ -3189,6 +3324,66 @@ plot_spatial_residuals_batch <- function(raster_dir, ga_runs,
           " raster(s) plotted (faceted by species).")
   invisible(out)
 }
+
+
+#' @title Spatial residuals for the OLDER age stanzas only (ages 3, 4, 5+).
+#' @description Thin wrapper around plot_spatial_residuals_batch(), restricted via its
+#'   `stanza_patterns` argument to just the older age-3/4/5+ stanzas for gag and red
+#'   grouper -- everything else (ensemble selection, predicted-mean computation, panel
+#'   spacing/layout, output naming) is identical to calling
+#'   plot_spatial_residuals_batch() directly with the same `stanza_patterns`. Exists as
+#'   its own function purely for convenience/readability at the call site, since "older
+#'   stanzas only" is a specific, recurring comparison (younger vs. older age classes
+#'   tend to show different spatial-fit patterns -- see the paper's discussion notes on
+#'   ontogenetic shifts) rather than a one-off filter worth re-typing every time.
+#' @inheritParams plot_spatial_residuals_batch
+#' @param species_patterns Character vector of case-insensitive substrings identifying
+#'   which species' older stanzas to include. Default c("gag", "red grouper") -- the
+#'   only two species this model tracks by stanza, so there should rarely be a reason
+#'   to override this.
+#' @return Same as plot_spatial_residuals_batch(): invisibly, a data.frame summarizing
+#'   what was plotted/skipped, one row per raster file scanned (including every
+#'   younger-stanza raster, correctly reported as skipped via `stanza_patterns` rather
+#'   than silently dropped).
+#' @export
+plot_spatial_residuals_older_stanzas <- function(raster_dir, ga_runs,
+                                                 ens_mode         = c("quantile", "topN", "aic"),
+                                                 keep_fitness_quantile = 0.9,
+                                                 top_n            = 100,
+                                                 top_n_prop       = NULL,
+                                                 target_ess       = 100,
+                                                 species_patterns = c("gag", "red grouper"),
+                                                 raster_pattern = "\\.asc$",
+                                                 manual_tokens = NULL,
+                                                 max_folders = 200,
+                                                 show_land = TRUE,
+                                                 land_mask = NULL,
+                                                 depth_grid = NULL,
+                                                 depth_threshold = 500,
+                                                 lon_breaks = NULL,
+                                                 lat_breaks = NULL,
+                                                 barheight = 2.8,
+                                                 barwidth = 0.45,
+                                                 facet_ncol = 3,
+                                                 base_size = 11,
+                                                 plots_dir = "plots",
+                                                 width = NULL, height = NULL, dpi = 250){
+  ens_mode <- match.arg(ens_mode)
+  older_stanza_patterns <- c("gag 3", "gag 4", "gag 5+", "red grouper 3", "red grouper 4",
+                             "red grouper 5+")
+  plot_spatial_residuals_batch(
+    raster_dir = raster_dir, ga_runs = ga_runs, ens_mode = ens_mode,
+    keep_fitness_quantile = keep_fitness_quantile, top_n = top_n, top_n_prop = top_n_prop,
+    target_ess = target_ess, species_patterns = species_patterns,
+    stanza_patterns = older_stanza_patterns, raster_pattern = raster_pattern,
+    manual_tokens = manual_tokens, max_folders = max_folders, show_land = show_land,
+    land_mask = land_mask, depth_grid = depth_grid, depth_threshold = depth_threshold,
+    lon_breaks = lon_breaks, lat_breaks = lat_breaks, barheight = barheight,
+    barwidth = barwidth, facet_ncol = facet_ncol, base_size = base_size,
+    plots_dir = plots_dir, width = width, height = height, dpi = dpi)
+}
+
+
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 # Region-linked spatial + time series (age0 gag survey regions)
@@ -6753,6 +6948,8 @@ plot_ecospace_ensemble_m0 <- function(map_root_dir,
     )
   )
 }
+
+
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 # cmd.txt: environmental response function parameters, colored by fitness
 #
@@ -7869,63 +8066,4 @@ discover_response_group_indices <- function(ga_runs, max_check = 5){
           "environmental response function, from ", n_checked, " candidate(s) checked: ",
           paste(idx_all, collapse = ", "))
   idx_all
-}
-
-#' @title Spatial residuals for the OLDER age stanzas only (ages 3, 4, 5+).
-#' @description Thin wrapper around plot_spatial_residuals_batch(), restricted via its
-#'   `stanza_patterns` argument to just the older age-3/4/5+ stanzas for gag and red
-#'   grouper -- everything else (ensemble selection, predicted-mean computation, panel
-#'   spacing/layout, output naming) is identical to calling
-#'   plot_spatial_residuals_batch() directly with the same `stanza_patterns`. Exists as
-#'   its own function purely for convenience/readability at the call site, since "older
-#'   stanzas only" is a specific, recurring comparison (younger vs. older age classes
-#'   tend to show different spatial-fit patterns -- see the paper's discussion notes on
-#'   ontogenetic shifts) rather than a one-off filter worth re-typing every time.
-#' @inheritParams plot_spatial_residuals_batch
-#' @param species_patterns Character vector of case-insensitive substrings identifying
-#'   which species' older stanzas to include. Default c("gag", "red grouper") -- the
-#'   only two species this model tracks by stanza, so there should rarely be a reason
-#'   to override this.
-#' @return Same as plot_spatial_residuals_batch(): invisibly, a data.frame summarizing
-#'   what was plotted/skipped, one row per raster file scanned (including every
-#'   younger-stanza raster, correctly reported as skipped via `stanza_patterns` rather
-#'   than silently dropped).
-#' @export
-plot_spatial_residuals_older_stanzas <- function(raster_dir, ga_runs,
-                                                 ens_mode         = c("quantile", "topN", "aic"),
-                                                 keep_fitness_quantile = 0.9,
-                                                 top_n            = 100,
-                                                 top_n_prop       = NULL,
-                                                 target_ess       = 100,
-                                                 species_patterns = c("gag", "red grouper"),
-                                                 raster_pattern = "\\.asc$",
-                                                 manual_tokens = NULL,
-                                                 max_folders = 200,
-                                                 show_land = TRUE,
-                                                 land_mask = NULL,
-                                                 depth_grid = NULL,
-                                                 depth_threshold = 500,
-                                                 lon_breaks = NULL,
-                                                 lat_breaks = NULL,
-                                                 barheight = 2.8,
-                                                 barwidth = 0.45,
-                                                 facet_ncol = 3,
-                                                 base_size = 11,
-                                                 plots_dir = "plots",
-                                                 width = NULL, height = NULL, dpi = 250){
-  ens_mode <- match.arg(ens_mode)
-  
-  older_stanza_patterns <- c("gag 3", "gag 4", "gag 5+", "red grouper 3", "red grouper 4",
-                             "red grouper 5+")
-  
-  plot_spatial_residuals_batch(
-    raster_dir = raster_dir, ga_runs = ga_runs, ens_mode = ens_mode,
-    keep_fitness_quantile = keep_fitness_quantile, top_n = top_n, top_n_prop = top_n_prop,
-    target_ess = target_ess, species_patterns = species_patterns,
-    stanza_patterns = older_stanza_patterns, raster_pattern = raster_pattern,
-    manual_tokens = manual_tokens, max_folders = max_folders, show_land = show_land,
-    land_mask = land_mask, depth_grid = depth_grid, depth_threshold = depth_threshold,
-    lon_breaks = lon_breaks, lat_breaks = lat_breaks, barheight = barheight,
-    barwidth = barwidth, facet_ncol = facet_ncol, base_size = base_size,
-    plots_dir = plots_dir, width = width, height = height, dpi = dpi)
 }
