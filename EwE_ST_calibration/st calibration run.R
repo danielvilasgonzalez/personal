@@ -24,7 +24,7 @@
 BASE_DIR <- "/Users/daniel/Work/ST_calibration"
 DATA_DIR <- file.path(BASE_DIR, "output")
 
-FUNCTIONS_PATH <- file.path(BASE_DIR, "st_calibration_functions.R")
+FUNCTIONS_PATH <- ("/Users/daniel/Documents/GitHub/personal/EwE_ST_calibration/st_calibration_functions.R")
 
 # must be library()'d, not just installed -- data.table's .()/:= syntax needs it attached
 library(data.table)
@@ -46,29 +46,81 @@ ga <- read.csv(
 )
 ga2 <- subset(ga, gen >= 0 & gen <= 27)
 
-# min | median | max NLL, each with its own SD NLL on a secondary axis (falls back to
-# min/max only if median_LL isn't in the CSV). sd_max fixes the secondary axis to the
-# SAME [0, sd_max] range across all three panels.
-has_median_LL <- "median_LL" %in% names(ga2)
-p_min <- plot_nll_convergence_panel(ga2, "min_LL", "minimum NLL", "#1B4F72",
-                                    gen_breaks = seq(0, 27, 5), sd_max = 1.5e5,
-                                    primary_min = 4000)  # zoomed -- min_LL only ranges ~4700-5700
-p_max <- plot_nll_convergence_panel(ga2, "max_LL", "maximum NLL", "#2E8B57",
-                                    gen_breaks = seq(0, 27, 5), sd_max = 1.5e5)
-if(has_median_LL){
-  p_median <- plot_nll_convergence_panel(ga2, "median_LL", "median NLL", "#8E44AD",
-                                         gen_breaks = seq(0, 27, 5), sd_max = 1.5e5)
-  p_nll_combined <- p_min + p_median + p_max
-} else {
-  p_nll_combined <- p_min + p_max
-}
+# Colors assigned so none repeat across the two panels -- all 5 series (min, sd,
+# mean, median, max) get their own distinct, colorblind-safe color (Okabe-Ito based,
+# same palette family used for region colors elsewhere in this script).
+p_panel1 <- plot_nll_convergence_panel(ga2, "min_LL", "minimum NLL", "#0072B2",
+                                       sd_color = "#D55E00",
+                                       gen_breaks = seq(0, 27, 5), sd_max = 1.5e5,
+                                       primary_min = 4000)  # zoomed -- min_LL only ranges ~4700-5700
+
+p_panel2 <- plot_nll_mean_median_max_panel(ga2,
+                                           mean_color = "#009E73",
+                                           median_color = "#6A3D9A",
+                                           max_color = "#CC79A7",
+                                           gen_breaks = seq(0, 27, 5))
+
+p_nll_combined <- p_panel1 + p_panel2
 p_nll_combined
 
 nll_plots_dir <- file.path(BASE_DIR, "plots/ts")
 if(!dir.exists(nll_plots_dir)) dir.create(nll_plots_dir, recursive = TRUE, showWarnings = FALSE)
 ggsave(file.path(nll_plots_dir, "ga_convergence_nll.png"), plot = p_nll_combined,
-       width = if(has_median_LL) 12 else 6, height = 3, dpi = 250, units = "in")
+       width = 8, height = 3, dpi = 250, units = "in")
 
+## ---- PART 3 (cont'd): final-generation parameter distributions -------------------------
+
+# GA search-space population matrices (NOT cmd.txt -- see read_ga_pop()'s own docs for
+# why these are different: env/red-tide are stored in cmd.txt as absolute shape
+# parameters, but the GA actually searches over MULTIPLIERS on those parameters, which
+# only these gapop CSVs retain directly).
+#ga runs
+ga_runs <- read_ga_runs(file.path(BASE_DIR, "results/final_ga_runs_20260724_084924.csv"))
+ga_runs <- resolve_run_dirs(ga_runs, gen_dir = gen_dir)
+
+best_row <- ga_runs[ga_runs$exists, ][which.min(ga_runs[ga_runs$exists, ]$fitness), ]
+message("Best-fit candidate: ", best_row$run_folder, " (fitness = ", signif(best_row$fitness, 6), ")")
+
+#catalog
+catalog <- read_sensitivity_response_catalog(
+  file.path(BASE_DIR, "sensitivity_sp03_5min_phase3_init_2026-07-23.xlsx"))
+
+# ---- final-generation GA parameter distributions ----------------------------------
+# GA search-space population matrices (NOT cmd.txt -- see read_ga_pop()'s own docs:
+# env/red-tide are stored in cmd.txt as absolute shape parameters, but the GA actually
+# searches over MULTIPLIERS on those parameters, which only these gapop CSVs retain
+# directly).
+gapop_final <- read_ga_pop(file.path(BASE_DIR, "results/final_ga_pop20260724_084924.csv"))
+gapop_init  <- read_ga_pop(file.path(BASE_DIR, "results/init_ga_pop20260724_084924.csv"))
+
+# group_names for resolving vul/disp pool codes to species names -- any candidate's own
+# Biomass export works, since Ecopath group order is identical across every candidate
+group_names <- get_region_output(0L, "Biomass", ga_runs$run_dir[ga_runs$exists][1],
+                                 new.env(parent = emptyenv()))$group_names
+
+gag_param_summary <- plot_ga_final_pop_distributions(
+  gapop_final       = gapop_final,
+  gapop_init        = gapop_init,
+  ga_runs           = ga_runs,
+  catalog           = catalog,
+  group_names       = group_names,
+  species_patterns  = "gag",
+  facet_ncol        = 8,
+  plots_dir         = file.path(BASE_DIR, "plots/ts")
+)
+print(gag_param_summary)
+
+redgrp_param_summary <- plot_ga_final_pop_distributions(
+  gapop_final       = gapop_final,
+  gapop_init        = gapop_init,
+  ga_runs           = ga_runs,
+  catalog           = catalog,
+  group_names       = group_names,
+  species_patterns  = "red grouper",
+  facet_ncol        = 4,
+  plots_dir         = file.path(BASE_DIR, "plots/ts")
+)
+print(redgrp_param_summary)
 
 ## ---- PART 4: observed vs. predicted time series ----------------------------------------
 
@@ -266,6 +318,7 @@ ens_m0_single <- plot_ecospace_ensemble_m0(
   run_folders = all_folders, species_patterns = c("gag", "red grouper"),
   groups = m0_groups, max_folders = 910, single_plot = TRUE,
   single_plot_uncertainty = TRUE,
+  y_lab = expression("Red tide mortality"~(year^{-1})),
   plots_dir = file.path(BASE_DIR, "plots/ts")
 )
 print(ens_m0_single)

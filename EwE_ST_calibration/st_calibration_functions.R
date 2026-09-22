@@ -6169,6 +6169,13 @@ weighted_quantile <- function(x, w, probs){
 #'   one panel, overlapping +/-1 SD ribbons get visually unreadable fast. TRUE draws
 #'   them anyway (semi-transparent, no separate fill legend) if you want them despite
 #'   the clutter.
+#' @param y_lab Optional y-axis label override, as a string or an expression() (e.g.
+#'   `expression(M0[red tide]~(year^{-1}))`). NULL (default) keeps the generic
+#'   "M0 (year^-1)" label -- appropriate for a call covering multiple species/groups
+#'   where "other mortality" may come from more than one source. Override this when a
+#'   specific call's M0 is known to be driven by a single, named process (e.g. gag/red
+#'   grouper in this model, where red tide is confirmed as the only environmental
+#'   driver of M0) and a more informative label would help the reader.
 #' @param plots_dir Output folder for PNGs (created if it doesn't exist). Default "plots".
 #' @param width,height,dpi ggsave() figure dimensions (inches) and resolution (dpi).
 #'   When `single_plot = TRUE`, height is scaled to 70% of this value (a single wide
@@ -6190,6 +6197,7 @@ plot_ecospace_ensemble_m0 <- function(map_root_dir,
                                       facet_ncol       = 4,
                                       single_plot      = FALSE,
                                       single_plot_uncertainty = FALSE,
+                                      y_lab            = NULL,
                                       plots_dir        = "plots",
                                       width = 11, height = 8, dpi = 150){
   
@@ -6660,7 +6668,7 @@ plot_ecospace_ensemble_m0 <- function(map_root_dir,
         ggplot2::labs(
           title = sp,
           x = "Year",
-          y = expression(
+          y = if(!is.null(y_lab)) y_lab else expression(
             M0~(year^{-1})
           )
         ) +
@@ -6813,7 +6821,7 @@ plot_ecospace_ensemble_m0 <- function(map_root_dir,
         ggplot2::labs(
           title = gname,
           x = "Year",
-          y = expression(
+          y = if(!is.null(y_lab)) y_lab else expression(
             M0~(year^{-1})
           )
         ) +
@@ -6951,7 +6959,409 @@ plot_ecospace_ensemble_m0 <- function(map_root_dir,
 
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-# cmd.txt: environmental response function parameters, colored by fitness
+# GA population parameter distributions -- final-generation histograms/response curves
+#
+# The GA search space (gapop matrices, one row per candidate, one column per GA-tuned
+# parameter) is DIFFERENT from what cmd.txt stores: vul/disp are written to cmd.txt
+# directly, but env/red-tide are written as ABSOLUTE shape parameters (e.g. XMid),
+# derived from a MULTIPLIER in gapop (e.g. xmid.adj) times a baseline value from the
+# response catalog (fn.parvec2cmd()'s XMid.i <- XMid.base * xmid.adj). These functions
+# work in GA search-space units directly from the saved gapop CSVs (init_ga_pop*.csv,
+# final_ga_pop*.csv), not from cmd.txt.
+#%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+#' @title Read a saved GA population matrix (init_ga_pop*.csv or final_ga_pop*.csv).
+#' @description These are written by write.csv(gapop, ...) with row.names = TRUE (the
+#'   default), so the first, unnamed column is the row number -- which for
+#'   final_ga_pop*.csv is exactly the `gapop_row` values in the matching
+#'   final_ga_runs*.csv (both are 1:nrow(gapop), written from the same in-memory
+#'   matrix). Renamed here to `gapop_row` explicitly so the two files join cleanly via
+#'   `merge(..., by = "gapop_row")` without relying on both being in row order.
+#' @param path Path to an init_ga_pop*.csv or final_ga_pop*.csv file.
+#' @return data.frame with a `gapop_row` column plus one column per GA-tuned parameter
+#'   (named exactly as in the GA's own par.labels, e.g. "vul_4_18", "env4_type10_xmid.adj").
+#' @export
+read_ga_pop <- function(path){
+  df <- utils::read.csv(path, check.names = FALSE, stringsAsFactors = FALSE)
+  names(df)[1] <- "gapop_row"
+  message("read_ga_pop(): ", basename(path), " -- ", nrow(df), " candidate(s), ",
+          ncol(df) - 1, " GA-tuned parameter(s).")
+  df
+}
+
+
+#' @keywords internal
+#' @noRd
+# Parses a gapop column name into (type, group, subparam). Matches the naming
+# convention from fn.makeparvec(): "vul_<pred>_<prey>", "env<N>_type<S>_<adj>",
+# "rt<N>_type<S>_<adj>", "disp_<pred>", "flt_<n>_<pow|mult>", "med<N>_type<S>_<par>".
+.parse_gapop_colname <- function(col){
+  if(grepl("^vul_", col)){
+    parts <- strsplit(col, "_")[[1]]
+    list(type = "vul", group = col, pred = as.integer(parts[2]),
+         prey = if(length(parts) >= 3 && nzchar(parts[3])) as.integer(parts[3]) else NA_integer_)
+  } else if(grepl("^env\\d+_", col)){
+    parts <- strsplit(col, "_")[[1]]
+    idx <- as.integer(gsub("^env(\\d+)_.*$", "\\1", col))
+    shp <- as.integer(gsub("^env\\d+_type(\\d+)_.*$", "\\1", col))
+    list(type = "env", group = paste0("env", idx), fxn_num = idx, shape_type = shp,
+         subparam = parts[length(parts)])
+  } else if(grepl("^rt\\d+_", col)){
+    parts <- strsplit(col, "_")[[1]]
+    idx <- as.integer(gsub("^rt(\\d+)_.*$", "\\1", col))
+    shp <- as.integer(gsub("^rt\\d+_type(\\d+)_.*$", "\\1", col))
+    list(type = "redtide", group = paste0("rt", idx), fxn_num = idx, shape_type = shp,
+         subparam = parts[length(parts)])
+  } else if(grepl("^disp_", col)){
+    list(type = "disp", group = col, pred = as.integer(strsplit(col, "_")[[1]][2]))
+  } else if(grepl("^flt_", col)){
+    parts <- strsplit(col, "_")[[1]]
+    list(type = "fleetdyn", group = col, fleet = as.integer(parts[2]), subparam = parts[3])
+  } else if(grepl("^med\\d+_", col)){
+    idx <- as.integer(gsub("^med(\\d+)_.*$", "\\1", col))
+    list(type = "med", group = paste0("med", idx), fxn_num = idx)
+  } else {
+    list(type = "other", group = col)
+  }
+}
+
+
+#' @title Plot final-generation GA parameter distributions: histograms + response curves.
+#' @description For the requested species (default gag), builds one panel per parameter
+#'   group in the final generation: a histogram (with red dashed lines at the lower/
+#'   upper search bounds, black dashed for the baseline, and solid blue for the best-fit
+#'   value) for vulnerability and dispersal parameters, or an overlaid response-curve
+#'   plot (every candidate's curve in light grey, black dashed for baseline, solid blue
+#'   for best-fit, and two red dashed "bound" curves -- one with BOTH sub-parameters at
+#'   their lower bound, one with both at their upper bound, showing two corners of the
+#'   search box rather than a full min/max envelope across every combination) for
+#'   environmental and red-tide response groups -- reusing eval_sigmoid_response()/
+#'   eval_trapezoid_response()/eval_normal_response()/eval_logistic4params_response(),
+#'   the same shape functions used elsewhere in this script. Also returns a summary
+#'   table with each parameter's baseline value, best-fit value, bounds, % of the bound
+#'   range the best-fit value
+#'   sits at, and whether it landed at (or very near) a bound.
+#' @param gapop_final Output of read_ga_pop() on final_ga_pop*.csv.
+#' @param gapop_init Output of read_ga_pop() on init_ga_pop*.csv -- row 1 (gapop_row == 1)
+#'   is the baseline (est_par_vec), per fn.GA()'s own `gapop[1,] <- est_par_vec`.
+#' @param ga_runs Output of read_ga_runs() on final_ga_runs*.csv -- supplies `fitness`
+#'   per `gapop_row`, used to find the best-fit candidate.
+#' @param catalog Output of read_sensitivity_response_catalog() (or
+#'   build_driver_map_from_sensitivity()'s catalog input) -- data.frame with
+#'   group_index, group_name, shape_type, par1..par6. Required to resolve env/red-tide
+#'   fxn_num to a species name (for filtering) and to draw response curves. NULL skips
+#'   env/red-tide panels entirely (vul/disp panels still work without it).
+#' @param group_names Character vector indexed by pool code + 1 (as returned by
+#'   read_ecospace_output()$group_names), used to resolve vul/disp pool codes to
+#'   species names for filtering. NULL skips species filtering for vul/disp (every
+#'   vul/disp parameter is shown).
+#' @param species_patterns Character vector of case-insensitive substrings, e.g. "gag".
+#'   A parameter is included if ANY of: its vul pred/prey group name, its disp pred
+#'   group name, or its env/red-tide catalog group_name matches. NULL = show everything
+#'   (all species, all types) -- most useful for `types` restricted to a single type at
+#'   a time given how large the full parameter set is.
+#' @param types Character vector restricting which parameter types to include, any of
+#'   "vul", "env", "redtide", "disp". NULL (default) = all types present.
+#' @param vul_bounds,env_bounds,redtide_inflection_bounds,redtide_slope_bounds Numeric
+#'   c(lower, upper) search bounds for each parameter type -- these are NOT re-derived
+#'   from fn.makeparvec() (which isn't available to this script), but can be recovered
+#'   exactly from the saved gapop CSVs themselves: env bounds are the clipped extremes
+#'   observed across the initial population (every env column hits the same exact min/
+#'   max if `env.cv` was small enough for the clip in fn.GApop() to activate); red-tide
+#'   bounds are read directly off the anchor rows fn.GApop() seeds at gapop_row 2 (all
+#'   lower bounds) and 3 (all upper bounds); vul bounds default to fn.makeparvec()'s own
+#'   [vul.min, vul.max] defaults under `vul.bounds.mode = "override"`. Defaults here
+#'   match this project's WFS-MICE phase-3 run (confirmed against its own gapop CSVs);
+#'   override for a different run.
+#' @param disp_cv Coefficient of variation used to derive per-parameter dispersal
+#'   bounds as `base.val * c(1 - 2*disp_cv, 1 + 2*disp_cv)`, matching
+#'   fn.makeparvec()'s own `lower.disp <- disp_vec - 2*disp.cv*disp_vec` formula.
+#'   Default 0.2 (confirmed for this project via the empirical SD of the unclipped
+#'   normal draws in the initial population, which independently estimated disp.cv
+#'   at 0.198-0.213 across 17 parameters).
+#' @param at_bound_pct Threshold (percent of the bound range) within which a best-fit
+#'   value is flagged as "at/near a bound" in the summary table. Default 5 (within 5%
+#'   of either end).
+#' @param facet_ncol Number of panel columns. Default 4.
+#' @param base_size Base font size (pt). Default 11.
+#' @param plots_dir,png_file Output folder/filename.
+#' @param width,height,dpi ggsave() figure dimensions (inches) and resolution (dpi).
+#'   NULL (default, width/height) auto-computes from facet_ncol and the number of panels.
+#' @return Invisibly, a data.frame with one row per plotted parameter: param, type,
+#'   group, species (if resolved), baseline, best_fit, lower_bound, upper_bound,
+#'   pct_of_range, at_bound (logical).
+#' @export
+plot_ga_final_pop_distributions <- function(gapop_final, gapop_init, ga_runs,
+                                            catalog = NULL, group_names = NULL,
+                                            species_patterns = "gag",
+                                            types = NULL,
+                                            vul_bounds = c(1.01, 1e6),
+                                            env_bounds = c(0.5, 1.5),
+                                            redtide_inflection_bounds = c(0.5, 2.0),
+                                            redtide_slope_bounds = c(0.5, 5.0),
+                                            disp_cv = 0.2,
+                                            at_bound_pct = 5,
+                                            facet_ncol = 8, base_size = 11,
+                                            plots_dir = "plots", png_file = NULL,
+                                            width = NULL, height = NULL, dpi = 200){
+  if(!requireNamespace("ggplot2", quietly = TRUE))
+    stop("Package 'ggplot2' is required. Install it with install.packages('ggplot2').")
+  if(!requireNamespace("patchwork", quietly = TRUE))
+    stop("Package 'patchwork' is required. Install it with install.packages('patchwork').")
+  
+  param_cols <- setdiff(names(gapop_final), "gapop_row")
+  baseline_row <- gapop_init[gapop_init$gapop_row == 1, param_cols, drop = FALSE]
+  baseline <- stats::setNames(as.numeric(baseline_row[1, ]), param_cols)
+  
+  best_gapop_row <- ga_runs$gapop_row[which.min(ga_runs$fitness)]
+  best_row <- gapop_final[gapop_final$gapop_row == best_gapop_row, param_cols, drop = FALSE]
+  if(nrow(best_row) == 0)
+    stop("plot_ga_final_pop_distributions(): gapop_row ", best_gapop_row,
+         " (best fitness) not found in gapop_final -- check that ga_runs and gapop_final ",
+         "come from the same GA run.")
+  best <- stats::setNames(as.numeric(best_row[1, ]), param_cols)
+  best_fitness <- min(ga_runs$fitness, na.rm = TRUE)
+  message("plot_ga_final_pop_distributions(): best-fit candidate is gapop_row ",
+          best_gapop_row, " (fitness = ", signif(best_fitness, 6), ").")
+  
+  parsed <- lapply(param_cols, .parse_gapop_colname)
+  names(parsed) <- param_cols
+  ptype <- vapply(parsed, function(p) p$type, character(1))
+  
+  if(!is.null(types)) param_cols <- param_cols[ptype %in% types]
+  
+  # ---- species resolution + filtering ----
+  resolve_species <- function(col){
+    p <- parsed[[col]]
+    if(p$type == "vul" && !is.null(group_names)){
+      nms <- c(if(!is.na(p$pred) && (p$pred + 1L) <= length(group_names)) group_names[p$pred + 1L] else NA,
+               if(!is.na(p$prey) && (p$prey + 1L) <= length(group_names)) group_names[p$prey + 1L] else NA)
+      nms <- nms[!is.na(nms) & nzchar(nms)]
+      if(length(nms) == 0) return(NA_character_)
+      paste(nms, collapse = " / ")
+    } else if(p$type == "disp" && !is.null(group_names)){
+      if(!is.na(p$pred) && (p$pred + 1L) <= length(group_names)) group_names[p$pred + 1L] else NA_character_
+    } else if(p$type %in% c("env", "redtide") && !is.null(catalog)){
+      row.i <- which(catalog$group_index == p$fxn_num)
+      if(length(row.i) == 0) return(NA_character_)
+      catalog$group_name[row.i[1]]
+    } else {
+      NA_character_
+    }
+  }
+  species_of <- vapply(param_cols, resolve_species, character(1))
+  
+  if(!is.null(species_patterns)){
+    keep <- vapply(species_of, function(nm){
+      if(is.na(nm)) return(FALSE)
+      any(vapply(species_patterns, function(p) grepl(p, nm, ignore.case = TRUE), logical(1)))
+    }, logical(1))
+    if(sum(keep) == 0)
+      stop("plot_ga_final_pop_distributions(): no parameters matched species_patterns = ",
+           paste(species_patterns, collapse = ", "), " -- check group_names/catalog are ",
+           "supplied and species_patterns match their naming (e.g. 'gag', not 'Gag').")
+    param_cols <- param_cols[keep]
+    species_of <- species_of[keep]
+  }
+  
+  message("plot_ga_final_pop_distributions(): ", length(param_cols), " parameter(s) selected ",
+          "after type/species filtering.")
+  
+  # ---- per-parameter bounds + summary row ----
+  get_bounds <- function(col){
+    p <- parsed[[col]]
+    if(p$type == "vul") return(vul_bounds)
+    if(p$type == "disp") return(baseline[col] * c(1 - 2 * disp_cv, 1 + 2 * disp_cv))
+    if(p$type == "env")  return(env_bounds)
+    if(p$type == "redtide")
+      return(if(grepl("inflection", p$subparam)) redtide_inflection_bounds else redtide_slope_bounds)
+    c(NA_real_, NA_real_)
+  }
+  
+  summary_rows <- list()
+  for(col in param_cols){
+    b <- get_bounds(col)
+    p <- parsed[[col]]
+    onlog <- p$type == "vul"
+    val <- best[col]
+    pct <- if(onlog) (log(val) - log(b[1])) / (log(b[2]) - log(b[1])) * 100
+    else (val - b[1]) / (b[2] - b[1]) * 100
+    summary_rows[[col]] <- data.frame(
+      param = col, type = p$type, group = p$group,
+      species = species_of[col], baseline = baseline[col], best_fit = val,
+      lower_bound = b[1], upper_bound = b[2], pct_of_range = round(pct, 1),
+      at_bound = !is.na(pct) && (pct <= at_bound_pct || pct >= 100 - at_bound_pct),
+      stringsAsFactors = FALSE)
+  }
+  summary_df <- do.call(rbind, summary_rows)
+  rownames(summary_df) <- NULL
+  n_at_bound <- sum(summary_df$at_bound)
+  message("plot_ga_final_pop_distributions(): ", n_at_bound, " of ", nrow(summary_df),
+          " selected parameter(s) landed within ", at_bound_pct, "% of a search bound.")
+  
+  # ---- build panels: histogram for vul/disp, response curve for env/redtide ----
+  # Panels are ordered by TYPE first (vul, then env, redtide, disp), then by STANZA
+  # NUMBER within each type -- e.g. every gag0 vul panel, then every gag1 vul panel,
+  # etc. -- rather than the arbitrary order the GA's own par.labels happened to list
+  # parameters in.
+  groups_to_plot <- unique(vapply(param_cols, function(c) parsed[[c]]$group, character(1)))
+  group_type <- vapply(groups_to_plot, function(g)
+    parsed[[param_cols[vapply(param_cols, function(c) parsed[[c]]$group, character(1)) == g][1]]]$type,
+    character(1))
+  type_rank <- c(vul = 1L, env = 2L, redtide = 3L, disp = 4L, fleetdyn = 5L, med = 6L, other = 7L)[group_type]
+  
+  .stanza_number <- function(name){
+    if(is.na(name)) return(NA_real_)
+    # species_of for vul is a combined "pred_name / prey_name" string, so the stanza
+    # number isn't necessarily at the string's end -- search for a number following
+    # one of the matched species_patterns specifically (e.g. "gag 4" inside
+    # "gag 4 / demersal fish"), falling back to any trailing number in the string.
+    pat <- if(!is.null(species_patterns))
+      paste0("(", paste(species_patterns, collapse = "|"), ")\\s*(\\d+)\\+?") else "(\\d+)\\+?\\s*$"
+    m <- regmatches(name, regexpr(pat, name, ignore.case = TRUE))
+    if(length(m) == 0 || !nzchar(m)){
+      m2 <- regmatches(name, regexpr("(\\d+)\\+?\\s*$", name))
+      if(length(m2) == 0 || !nzchar(m2)) return(NA_real_)
+      return(as.numeric(gsub("\\+", "", m2)))
+    }
+    num <- regmatches(m, regexpr("\\d+", m))
+    as.numeric(num)
+  }
+  group_stanza <- vapply(groups_to_plot, function(g){
+    cols_g <- param_cols[vapply(param_cols, function(c) parsed[[c]]$group, character(1)) == g]
+    p1 <- parsed[[cols_g[1]]]
+    if(p1$type %in% c("vul", "disp")){
+      .stanza_number(species_of[cols_g[1]])
+    } else if(p1$type %in% c("env", "redtide")){
+      .stanza_number(species_of[cols_g[1]])
+    } else {
+      NA_real_
+    }
+  }, numeric(1))
+  
+  groups_to_plot <- groups_to_plot[order(type_rank, group_stanza, groups_to_plot)]
+  panel_list <- list()
+  
+  for(grp in groups_to_plot){
+    cols_g <- param_cols[vapply(param_cols, function(c) parsed[[c]]$group, character(1)) == grp]
+    p1 <- parsed[[cols_g[1]]]
+    sp_label <- species_of[cols_g[1]]
+    title_lab <- if(!is.na(sp_label)) paste0(grp, " (", sp_label, ")") else grp
+    
+    if(p1$type %in% c("vul", "disp")){
+      col <- cols_g[1]
+      b <- get_bounds(col)
+      onlog <- p1$type == "vul"
+      vals <- gapop_final[[col]]
+      df_hist <- data.frame(value = vals)
+      pp <- ggplot2::ggplot(df_hist, ggplot2::aes(x = value)) +
+        { if(onlog) ggplot2::geom_histogram(bins = 50) else ggplot2::geom_histogram(bins = 40) } +
+        ggplot2::geom_vline(xintercept = b[1], color = "red", linetype = "22", linewidth = 0.8) +
+        ggplot2::geom_vline(xintercept = b[2], color = "red", linetype = "22", linewidth = 0.8) +
+        ggplot2::geom_vline(xintercept = baseline[col], color = "black", linetype = "22", linewidth = 1) +
+        ggplot2::geom_vline(xintercept = best[col], color = "#0072B2", linewidth = 1) +
+        { if(onlog) ggplot2::scale_x_log10() } +
+        ggplot2::labs(title = title_lab, x = "value", y = "count") +
+        ggplot2::theme_bw(base_size = base_size) +
+        ggplot2::theme(plot.title = ggplot2::element_text(size = base_size, face = "bold"), aspect.ratio = 1)
+      panel_list[[grp]] <- pp
+      next
+    }
+    
+    # env / redtide: response curve, reusing this script's own eval_*_response()
+    if(is.null(catalog)) next
+    row.i <- which(catalog$group_index == p1$fxn_num)
+    if(length(row.i) == 0) next
+    row.i <- row.i[1]
+    shp <- catalog$shape_type[row.i]
+    pr <- c(catalog$par1[row.i], catalog$par2[row.i], catalog$par3[row.i],
+            catalog$par4[row.i], catalog$par5[row.i], catalog$par6[row.i])
+    adj1_col <- cols_g[grepl("xmid|mean|inflection", cols_g)][1]
+    adj2_col <- cols_g[grepl("slope|width", cols_g)][1]
+    if(is.na(adj1_col)) adj1_col <- cols_g[1]
+    if(is.na(adj2_col)) adj2_col <- if(length(cols_g) >= 2) cols_g[2] else adj1_col
+    adj1_all <- gapop_final[[adj1_col]]
+    adj2_all <- gapop_final[[adj2_col]]
+    bounds1 <- get_bounds(adj1_col)
+    bounds2 <- get_bounds(adj2_col)
+    
+    if(shp == 10){        # sigmoid: par1 XMin, par2 XMax, par3 XMid, par4 XOpt, par5 Slope, par6 Scalar
+      x <- seq(pr[1], pr[2], length.out = 150)
+      f <- function(xmid_adj, slope_adj) pr[6] / (1 + exp(-(pr[5] * slope_adj) * (x - pr[3] * xmid_adj)))
+      curves <- lapply(seq_along(adj1_all), function(k) data.frame(x = x, y = f(adj1_all[k], adj2_all[k]), k = k))
+      curves <- do.call(rbind, curves)
+      base_curve <- data.frame(x = x, y = f(1, 1))
+      best_curve <- data.frame(x = x, y = f(best[adj1_col], best[adj2_col]))
+      bound_lo_curve <- data.frame(x = x, y = f(bounds1[1], bounds2[1]))
+      bound_hi_curve <- data.frame(x = x, y = f(bounds1[2], bounds2[2]))
+    } else if(shp == 9){   # trapezoid: par1 LB, par2 LT, par3 RT, par4 RB
+      mid.base <- (pr[3] + pr[2]) / 2; pref.base <- pr[3] - pr[2]
+      trap <- function(mid_adj, w_adj){
+        mid.i <- mid.base * mid_adj; pref.i <- pref.base * w_adj
+        LT.i <- max(0, mid.i - pref.i / 2); RT.i <- mid.i + pref.i / 2
+        LB.i <- LT.i - (pr[2] - pr[1]) * w_adj; RB.i <- RT.i + (pr[4] - pr[3]) * w_adj
+        data.frame(x = c(LB.i, LT.i, RT.i, RB.i), y = c(0, 1, 1, 0))
+      }
+      curves <- do.call(rbind, lapply(seq_along(adj1_all), function(k){
+        d <- trap(adj1_all[k], adj2_all[k]); d$k <- k; d
+      }))
+      base_curve <- trap(1, 1)
+      best_curve <- trap(best[adj1_col], best[adj2_col])
+      bound_lo_curve <- trap(bounds1[1], bounds2[1])
+      bound_hi_curve <- trap(bounds1[2], bounds2[2])
+    } else if(shp == 6){   # normal: par1 SDLeft, par3 SDRight, par4 Mean, par5 Max
+      dw.base <- 5 * pr[1] + 5 * pr[3]
+      x <- seq(pr[4] - dw.base, pr[4] + dw.base, length.out = 150)
+      f <- function(mean_adj, width_adj) eval_normal_response(x, pr[4] * mean_adj, pr[1] * width_adj, pr[3] * width_adj, pr[5])
+      curves <- do.call(rbind, lapply(seq_along(adj1_all), function(k)
+        data.frame(x = x, y = f(adj1_all[k], adj2_all[k]), k = k)))
+      base_curve <- data.frame(x = x, y = f(1, 1))
+      best_curve <- data.frame(x = x, y = f(best[adj1_col], best[adj2_col]))
+      bound_lo_curve <- data.frame(x = x, y = f(bounds1[1], bounds2[1]))
+      bound_hi_curve <- data.frame(x = x, y = f(bounds1[2], bounds2[2]))
+    } else if(shp == 11){  # logistic4params: par1 XMin, par2 XMax, par3 Inflection, par4 Slope
+      x <- seq(pr[1], pr[2], length.out = 150)
+      f <- function(inf_adj, slope_adj) eval_logistic4params_response(x, pr[1], pr[2], pr[3] * inf_adj, pr[4] * slope_adj)
+      curves <- do.call(rbind, lapply(seq_along(adj1_all), function(k)
+        data.frame(x = x, y = f(adj1_all[k], adj2_all[k]), k = k)))
+      base_curve <- data.frame(x = x, y = f(1, 1))
+      best_curve <- data.frame(x = x, y = f(best[adj1_col], best[adj2_col]))
+      bound_lo_curve <- data.frame(x = x, y = f(bounds1[1], bounds2[1]))
+      bound_hi_curve <- data.frame(x = x, y = f(bounds1[2], bounds2[2]))
+    } else next
+    
+    pp <- ggplot2::ggplot() +
+      ggplot2::geom_line(data = curves, ggplot2::aes(x = x, y = y, group = k), color = "grey60", alpha = 0.12, linewidth = 0.3) +
+      ggplot2::geom_line(data = bound_lo_curve, ggplot2::aes(x = x, y = y), color = "red", linetype = "22", linewidth = 0.8) +
+      ggplot2::geom_line(data = bound_hi_curve, ggplot2::aes(x = x, y = y), color = "red", linetype = "22", linewidth = 0.8) +
+      ggplot2::geom_line(data = base_curve, ggplot2::aes(x = x, y = y), color = "black", linetype = "22", linewidth = 1) +
+      ggplot2::geom_line(data = best_curve, ggplot2::aes(x = x, y = y), color = "#0072B2", linewidth = 1) +
+      ggplot2::labs(title = title_lab, x = "x", y = "response") +
+      ggplot2::theme_bw(base_size = base_size) +
+      ggplot2::theme(plot.title = ggplot2::element_text(size = base_size, face = "bold"), aspect.ratio = 1)
+    panel_list[[grp]] <- pp
+  }
+  
+  if(length(panel_list) == 0)
+    stop("plot_ga_final_pop_distributions(): no panels to plot -- check types/species_patterns/catalog.")
+  
+  n_rows <- ceiling(length(panel_list) / facet_ncol)
+  w <- if(is.null(width)) max(4, facet_ncol * 3.2) else width
+  h <- if(is.null(height)) max(3.2, n_rows * 3.2) else height
+  p_combined <- patchwork::wrap_plots(panel_list, ncol = facet_ncol)
+  
+  if(is.null(png_file))
+    png_file <- paste0("ga_final_pop_distributions_", paste(species_patterns, collapse = "_"), ".png")
+  if(!dir.exists(plots_dir)) dir.create(plots_dir, recursive = TRUE, showWarnings = FALSE)
+  out_path <- file.path(plots_dir, png_file)
+  ggplot2::ggsave(out_path, plot = p_combined, width = w, height = h, dpi = dpi, units = "in")
+  message("Wrote ", out_path, " (", length(panel_list), " panel(s)).")
+  
+  invisible(summary_df)
+}
+
+
+
 #
 # Each candidate's cmd.txt has lines like:
 #   <ECOSPACE_ENVIRONMENTAL_RESPONSE_INDEXED>(4), 10 9.144 132.59 18.9209 0 -0.1563 0.991, Indexed.Single[]
