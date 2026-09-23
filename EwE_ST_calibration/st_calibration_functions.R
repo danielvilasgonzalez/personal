@@ -164,11 +164,11 @@ plot_nll_convergence_panel <- function(ga2, primary_col, primary_label, primary_
     ggplot2::geom_line(ggplot2::aes(y = .primary, colour = primary_label),
                        linewidth = 1, alpha = 0.7) +
     ggplot2::geom_point(ggplot2::aes(y = .primary, colour = primary_label),
-                        size = 2, alpha = 0.7) +
+                        shape = 16, size = 1.6, alpha = 0.7) +
     ggplot2::geom_line(ggplot2::aes(y = .sd_scaled, colour = sd_label),
-                       linewidth = 1, linetype = "22", alpha = 0.7) +
+                       linewidth = 1, alpha = 0.7) +
     ggplot2::geom_point(ggplot2::aes(y = .sd_scaled, colour = sd_label),
-                        shape = 17, size = 2, alpha = 0.7) +
+                        shape = 16, size = 1.6, alpha = 0.7) +
     ggplot2::scale_colour_manual(values = colors, name = NULL) +
     # scale_y_continuous(limits=), NOT coord_cartesian() -- this is what makes sec_axis()
     # actually respect primary_min/sd_max. coord_cartesian() only zooms the VIEW; it
@@ -296,15 +296,15 @@ plot_nll_mean_median_max_panel <- function(ga2,
     ggplot2::geom_line(ggplot2::aes(y = .mean, colour = mean_label),
                        linewidth = 1, alpha = 0.7) +
     ggplot2::geom_point(ggplot2::aes(y = .mean, colour = mean_label),
-                        size = 2, alpha = 0.7) +
+                        shape = 16, size = 1.6, alpha = 0.7) +
     ggplot2::geom_line(ggplot2::aes(y = .median, colour = median_label),
                        linewidth = 1, alpha = 0.7) +
     ggplot2::geom_point(ggplot2::aes(y = .median, colour = median_label),
-                        size = 2, alpha = 0.7) +
+                        shape = 16, size = 1.6, alpha = 0.7) +
     ggplot2::geom_line(ggplot2::aes(y = .max_scaled, colour = max_label),
-                       linewidth = 1, linetype = "22", alpha = 0.7) +
+                       linewidth = 1, alpha = 0.7) +
     ggplot2::geom_point(ggplot2::aes(y = .max_scaled, colour = max_label),
-                        shape = 17, size = 2, alpha = 0.7) +
+                        shape = 16, size = 1.6, alpha = 0.7) +
     ggplot2::scale_colour_manual(values = colors, name = NULL) +
     ggplot2::scale_y_continuous(
       name = "mean / median NLL",
