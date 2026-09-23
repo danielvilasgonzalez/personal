@@ -75,6 +75,7 @@ ggsave(file.path(nll_plots_dir, "ga_convergence_nll.png"), plot = p_nll_combined
 # parameters, but the GA actually searches over MULTIPLIERS on those parameters, which
 # only these gapop CSVs retain directly).
 #ga runs
+gen_dir  <- DATA_DIR
 ga_runs <- read_ga_runs(file.path(BASE_DIR, "results/final_ga_runs_20260724_084924.csv"))
 ga_runs <- resolve_run_dirs(ga_runs, gen_dir = gen_dir)
 
@@ -185,14 +186,6 @@ top_summary <- plot_ga_final_pop_distributions(
   plots_dir = file.path(BASE_DIR, "plots/ts")
 )
 print(top_summary)
-
-
-
-
-
-
-
-
 
 
 ## ---- PART 4: observed vs. predicted time series ----------------------------------------
