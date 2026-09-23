@@ -7040,7 +7040,16 @@ read_ga_pop <- function(path){
 #'   the same shape functions used elsewhere in this script. Also returns a summary
 #'   table with each parameter's baseline value, best-fit value, bounds, % of the bound
 #'   range the best-fit value
-#'   sits at, and whether it landed at (or very near) a bound.
+#'   sits at, and whether it landed at (or very near) a bound. Panel titles and axis
+#'   labels are kept compact to fit many panels per figure: vulnerability panels are
+#'   titled "V (predname/preyname)" (spaces stripped); environmental response panels
+#'   use the driver name from `catalog$driver` (e.g. "depth (gag0)"), with a matching
+#'   x-axis unit where known; red-tide panels are labeled "RTmort"/"RTforag" per
+#'   `catalog$resp_type`, with an x-axis of "cells/L" and large tick labels abbreviated
+#'   (e.g. "250K" instead of "250000"); dispersal panels are titled "disp (gag1)". Axis
+#'   TITLES (not tick labels, which stay on every panel) are shown only on the first
+#'   column (y) and the bottommost panel of each column (x), avoiding the same "value"/
+#'   "count" text repeated on every one of many panels.
 #' @param gapop_final Output of read_ga_pop() on final_ga_pop*.csv.
 #' @param gapop_init Output of read_ga_pop() on init_ga_pop*.csv -- row 1 (gapop_row == 1)
 #'   is the baseline (est_par_vec), per fn.GA()'s own `gapop[1,] <- est_par_vec`.
@@ -7082,14 +7091,45 @@ read_ga_pop <- function(path){
 #' @param at_bound_pct Threshold (percent of the bound range) within which a best-fit
 #'   value is flagged as "at/near a bound" in the summary table. Default 5 (within 5%
 #'   of either end).
-#' @param facet_ncol Number of panel columns. Default 4.
+#' @param facet_ncol Number of panel columns. Default 8.
 #' @param base_size Base font size (pt). Default 11.
+#' @param overall_title Optional single title for the whole combined figure (added via
+#'   patchwork::plot_annotation()), most useful when a single call covers just one
+#'   parameter type (e.g. `types = "disp"`). When supplied, each individual panel's own
+#'   title is simplified to just the stanza/species label (e.g. "gag1") instead of
+#'   repeating the type prefix in every panel (e.g. "disp (gag1)") -- avoids the same
+#'   information appearing twice. NULL (default) keeps each panel's own full label.
+#' @param title_inside Logical, default TRUE. TRUE draws each panel's title as an
+#'   in-panel text annotation in the top-left corner instead of a standard ggplot
+#'   title row above the panel -- this is the single biggest space saver when packing
+#'   many panels into one figure, since it removes an entire title row's worth of
+#'   vertical space per panel. FALSE reverts to a conventional title row.
+#' @param abbreviate_minlength Optional integer. When supplied, each word in a panel's
+#'   species/stanza label is passed through base R's abbreviate() with this target
+#'   length (e.g. "demersalfish" -> "dmrslfsh" at minlength=8) before building the
+#'   panel title -- a further space saving on top of the space-stripping already
+#'   applied to every label, useful when panels are packed tightly enough that even
+#'   "gag5+/demersalfish" doesn't fit. NULL (default) = no abbreviation, keeping labels
+#'   fully readable at the cost of more horizontal space per panel.
 #' @param plots_dir,png_file Output folder/filename.
+#' @param save_plot Logical, default TRUE. FALSE skips writing the PNG (the plot is
+#'   still built and returned via attr(), see @return) -- useful when this call's
+#'   output is only an intermediate section of a larger combined figure (e.g. panel B
+#'   of an A/B/C multi-panel figure) and only the final combined figure needs saving.
 #' @param width,height,dpi ggsave() figure dimensions (inches) and resolution (dpi).
 #'   NULL (default, width/height) auto-computes from facet_ncol and the number of panels.
 #' @return Invisibly, a data.frame with one row per plotted parameter: param, type,
 #'   group, species (if resolved), baseline, best_fit, lower_bound, upper_bound,
-#'   pct_of_range, at_bound (logical).
+#'   pct_of_range, at_bound (logical). The combined patchwork plot for THIS call is
+#'   attached as attr(result, "plot") -- retrieve it to stitch several calls (e.g. one
+#'   per parameter type) into one lettered multi-panel figure:
+#'   \preformatted{
+#'   s1 <- plot_ga_final_pop_distributions(..., types = "vul", overall_title = "A) Vulnerabilities", save_plot = FALSE)
+#'   s2 <- plot_ga_final_pop_distributions(..., types = c("env","redtide"), overall_title = "B) Environmental and red-tide responses", save_plot = FALSE)
+#'   s3 <- plot_ga_final_pop_distributions(..., types = "disp", overall_title = "C) Dispersal rates", save_plot = FALSE)
+#'   combined <- patchwork::wrap_plots(list(attr(s1,"plot"), attr(s2,"plot"), attr(s3,"plot")), ncol = 1)
+#'   ggplot2::ggsave("combined.png", combined, width = 22, height = 24, dpi = 200)
+#'   }
 #' @export
 plot_ga_final_pop_distributions <- function(gapop_final, gapop_init, ga_runs,
                                             catalog = NULL, group_names = NULL,
@@ -7102,7 +7142,10 @@ plot_ga_final_pop_distributions <- function(gapop_final, gapop_init, ga_runs,
                                             disp_cv = 0.2,
                                             at_bound_pct = 5,
                                             facet_ncol = 8, base_size = 11,
-                                            plots_dir = "plots", png_file = NULL,
+                                            overall_title = NULL,
+                                            title_inside = TRUE,
+                                            abbreviate_minlength = NULL,
+                                            plots_dir = "plots", png_file = NULL, save_plot = TRUE,
                                             width = NULL, height = NULL, dpi = 200){
   if(!requireNamespace("ggplot2", quietly = TRUE))
     stop("Package 'ggplot2' is required. Install it with install.packages('ggplot2').")
@@ -7240,13 +7283,82 @@ plot_ga_final_pop_distributions <- function(gapop_final, gapop_init, ga_runs,
   }, numeric(1))
   
   groups_to_plot <- groups_to_plot[order(type_rank, group_stanza, groups_to_plot)]
+  n_groups <- length(groups_to_plot)
   panel_list <- list()
   
-  for(grp in groups_to_plot){
+  # driver -> x-axis unit, for env panels (red-tide gets its own "cells/L" unit,
+  # handled separately below since it's not a physical habitat driver)
+  driver_units <- c(depth = "m", temp = "\u00b0C", salinity = "PSU", DO = "mg/L")
+  .nospace <- function(x) gsub("\\s+", "", x)
+  # abbreviate_minlength applies base R's abbreviate() to EACH "/"-separated part
+  # separately (vul labels are "predname/preyname" combined strings) so a long
+  # component gets shortened without abbreviate() mangling the "/" separator itself.
+  .abbrev_label <- function(x){
+    if(is.null(abbreviate_minlength)) return(x)
+    parts <- strsplit(x, "/", fixed = TRUE)[[1]]
+    paste(unname(abbreviate(parts, minlength = abbreviate_minlength)), collapse = "/")
+  }
+  
+  for(idx in seq_along(groups_to_plot)){
+    grp <- groups_to_plot[idx]
+    col_pos <- ((idx - 1) %% facet_ncol) + 1
+    show_y_axis <- (col_pos == 1)
+    panels_in_this_col <- seq(col_pos, n_groups, by = facet_ncol)
+    show_x_axis <- (idx == max(panels_in_this_col))
+    
     cols_g <- param_cols[vapply(param_cols, function(c) parsed[[c]]$group, character(1)) == grp]
     p1 <- parsed[[cols_g[1]]]
     sp_label <- species_of[cols_g[1]]
-    title_lab <- if(!is.na(sp_label)) paste0(grp, " (", sp_label, ")") else grp
+    sp_clean <- if(!is.na(sp_label)) .abbrev_label(.nospace(sp_label)) else grp
+    
+    # ---- compact, type-specific title + x-axis label ----
+    # overall_title suppresses the type-prefix in each panel's own title (the type is
+    # already stated once, in the shared figure title) -- see @param overall_title.
+    if(p1$type == "vul"){
+      title_lab <- if(!is.null(overall_title)) sp_clean else paste0("V (", sp_clean, ")")
+      x_lab <- "value"
+    } else if(p1$type == "disp"){
+      title_lab <- if(!is.null(overall_title)) sp_clean else paste0("disp (", sp_clean, ")")
+      x_lab <- "value"
+    } else if(p1$type == "env"){
+      row.i <- which(catalog$group_index == p1$fxn_num)
+      driver_nm <- if(length(row.i) > 0 && "driver" %in% names(catalog)) catalog$driver[row.i[1]] else "env"
+      unit <- driver_units[driver_nm]
+      title_lab <- if(!is.null(overall_title)) sp_clean else paste0(driver_nm, " (", sp_clean, ")")
+      x_lab <- if(!is.na(unit)) paste0(driver_nm, " (", unit, ")") else driver_nm
+    } else if(p1$type == "redtide"){
+      row.i <- which(catalog$group_index == p1$fxn_num)
+      rt_type <- if(length(row.i) > 0 && "resp_type" %in% names(catalog)) tolower(catalog$resp_type[row.i[1]]) else NA_character_
+      rt_label <- if(!is.na(rt_type) && grepl("mortal", rt_type)) "RTmort" else
+        if(!is.na(rt_type) && grepl("forag", rt_type)) "RTforag" else "RT"
+      title_lab <- if(!is.null(overall_title)) sp_clean else paste0(rt_label, " (", sp_clean, ")")
+      x_lab <- "cells/L"
+    } else {
+      title_lab <- grp; x_lab <- "value"
+    }
+    axis_title_theme <- ggplot2::theme(
+      axis.title.x = if(show_x_axis) ggplot2::element_text() else ggplot2::element_blank(),
+      axis.title.y = if(show_y_axis) ggplot2::element_text() else ggplot2::element_blank(),
+      # tight margins are what actually controls inter-panel spacing in a patchwork
+      # grid -- patchwork just stacks each panel's own grob, so the visible gap
+      # between panels is the SUM of the two adjacent panels' own margins
+      plot.margin = ggplot2::margin(2, 2, 2, 2)
+    )
+    # title_inside draws the title as an in-panel text annotation (top-left corner,
+    # -Inf/Inf + hjust/vjust offset places it there regardless of the panel's own
+    # data range or scale transform) instead of a conventional ggplot title row --
+    # this removes an entire row of vertical space per panel, the single biggest
+    # space saving available here. plot.title itself is blanked out either way so
+    # nothing doubles up.
+    title_layer <- if(title_inside)
+      ggplot2::annotate("text", x = -Inf, y = Inf, label = title_lab, hjust = -0.05, vjust = 1.3,
+                        fontface = "bold", size = base_size * 0.3)
+    else NULL
+    title_theme <- ggplot2::theme(
+      plot.title = if(title_inside) ggplot2::element_blank()
+      else ggplot2::element_text(size = base_size, face = "bold")
+    )
+    labs_title <- if(title_inside) NULL else title_lab
     
     if(p1$type %in% c("vul", "disp")){
       col <- cols_g[1]
@@ -7261,9 +7373,12 @@ plot_ga_final_pop_distributions <- function(gapop_final, gapop_init, ga_runs,
         ggplot2::geom_vline(xintercept = baseline[col], color = "black", linetype = "22", linewidth = 1) +
         ggplot2::geom_vline(xintercept = best[col], color = "#0072B2", linewidth = 1) +
         { if(onlog) ggplot2::scale_x_log10() } +
-        ggplot2::labs(title = title_lab, x = "value", y = "count") +
+        title_layer +
+        ggplot2::labs(title = labs_title, x = x_lab, y = "count") +
         ggplot2::theme_bw(base_size = base_size) +
-        ggplot2::theme(plot.title = ggplot2::element_text(size = base_size, face = "bold"), aspect.ratio = 1)
+        ggplot2::theme(aspect.ratio = 1) +
+        title_theme +
+        axis_title_theme
       panel_list[[grp]] <- pp
       next
     }
@@ -7336,9 +7451,15 @@ plot_ga_final_pop_distributions <- function(gapop_final, gapop_init, ga_runs,
       ggplot2::geom_line(data = bound_hi_curve, ggplot2::aes(x = x, y = y), color = "red", linetype = "22", linewidth = 0.8) +
       ggplot2::geom_line(data = base_curve, ggplot2::aes(x = x, y = y), color = "black", linetype = "22", linewidth = 1) +
       ggplot2::geom_line(data = best_curve, ggplot2::aes(x = x, y = y), color = "#0072B2", linewidth = 1) +
-      ggplot2::labs(title = title_lab, x = "x", y = "response") +
+      title_layer +
+      ggplot2::labs(title = labs_title, x = x_lab, y = "response") +
+      # red-tide cells/L values run into the hundreds of thousands/millions --
+      # abbreviate tick labels (e.g. "250K", "1M") rather than showing every zero
+      { if(p1$type == "redtide") ggplot2::scale_x_continuous(labels = scales::label_number(scale_cut = scales::cut_short_scale())) } +
       ggplot2::theme_bw(base_size = base_size) +
-      ggplot2::theme(plot.title = ggplot2::element_text(size = base_size, face = "bold"), aspect.ratio = 1)
+      ggplot2::theme(aspect.ratio = 1) +
+      title_theme +
+      axis_title_theme
     panel_list[[grp]] <- pp
   }
   
@@ -7349,14 +7470,26 @@ plot_ga_final_pop_distributions <- function(gapop_final, gapop_init, ga_runs,
   w <- if(is.null(width)) max(4, facet_ncol * 3.2) else width
   h <- if(is.null(height)) max(3.2, n_rows * 3.2) else height
   p_combined <- patchwork::wrap_plots(panel_list, ncol = facet_ncol)
+  if(!is.null(overall_title))
+    p_combined <- p_combined + patchwork::plot_annotation(
+      title = overall_title,
+      theme = ggplot2::theme(plot.title = ggplot2::element_text(size = base_size * 1.3, face = "bold", hjust = 0.5)))
   
-  if(is.null(png_file))
-    png_file <- paste0("ga_final_pop_distributions_", paste(species_patterns, collapse = "_"), ".png")
-  if(!dir.exists(plots_dir)) dir.create(plots_dir, recursive = TRUE, showWarnings = FALSE)
-  out_path <- file.path(plots_dir, png_file)
-  ggplot2::ggsave(out_path, plot = p_combined, width = w, height = h, dpi = dpi, units = "in")
-  message("Wrote ", out_path, " (", length(panel_list), " panel(s)).")
+  if(save_plot){
+    if(is.null(png_file))
+      png_file <- paste0("ga_final_pop_distributions_", paste(species_patterns, collapse = "_"), ".png")
+    if(!dir.exists(plots_dir)) dir.create(plots_dir, recursive = TRUE, showWarnings = FALSE)
+    out_path <- file.path(plots_dir, png_file)
+    ggplot2::ggsave(out_path, plot = p_combined, width = w, height = h, dpi = dpi, units = "in")
+    message("Wrote ", out_path, " (", length(panel_list), " panel(s)).")
+  }
   
+  # the combined patchwork plot is attached as an attribute (not the return value
+  # itself) so this stays backward-compatible: summary_df is still a plain
+  # data.frame for existing callers, while a caller that wants to combine several
+  # calls into one multi-panel figure (e.g. A/B/C lettered sections) can retrieve
+  # it via attr(result, "plot") -- see the @return docs for a worked example.
+  attr(summary_df, "plot") <- p_combined
   invisible(summary_df)
 }
 

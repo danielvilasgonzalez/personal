@@ -187,6 +187,53 @@ top_summary <- plot_ga_final_pop_distributions(
 )
 print(top_summary)
 
+#4 -- composed A/B/C multi-panel figure: vulnerabilities, environmental + red-tide
+# responses, and dispersal rates as three lettered sections of one combined figure,
+# building on option 2's settings (base_size = 16). Each sub-call uses save_plot =
+# FALSE so only the final combined figure gets written to disk, not three separate
+# intermediate PNGs; each section's own plot object is retrieved via attr(..., "plot")
+# after the call, since the function's ordinary return value stays a plain summary
+# data.frame for backward compatibility. overall_title both labels the section and
+# drops the repeated type-prefix (e.g. "V (...)"/"disp (...)") from every panel inside
+# it, since the section title already states the type once.
+vul_summaryABC <- plot_ga_final_pop_distributions(
+  gapop_final = gapop_final, gapop_init = gapop_init, ga_runs = ga_runs,
+  catalog = catalog, group_names = group_names, species_patterns = "gag",
+  types = "vul", facet_ncol = 6, base_size = 16,
+  overall_title = "A) Vulnerabilities",
+  save_plot = FALSE, plots_dir = file.path(BASE_DIR, "plots/ts")
+)
+
+env_summaryABC <- plot_ga_final_pop_distributions(
+  gapop_final = gapop_final, gapop_init = gapop_init, ga_runs = ga_runs,
+  catalog = catalog, group_names = group_names, species_patterns = "gag",
+  types = c("env", "redtide"), facet_ncol = 6, base_size = 16,
+  overall_title = "B) Environmental and red-tide responses",
+  save_plot = FALSE, plots_dir = file.path(BASE_DIR, "plots/ts")
+)
+
+disp_summaryABC <- plot_ga_final_pop_distributions(
+  gapop_final = gapop_final, gapop_init = gapop_init, ga_runs = ga_runs,
+  catalog = catalog, group_names = group_names, species_patterns = "gag",
+  types = "disp", facet_ncol = 6, base_size = 16,
+  overall_title = "C) Dispersal rates",
+  save_plot = FALSE, plots_dir = file.path(BASE_DIR, "plots/ts")
+)
+
+# heights are a rough guess at each section's own row count at facet_ncol = 6 (34
+# vulnerability panels -> ~6 rows; 16 env/red-tide panels -> ~3 rows; 4 dispersal
+# panels -> 1 row) -- adjust once you see the actual combined figure, since a section
+# with fewer rows will otherwise look stretched relative to the 34-panel block.
+combined_gag_pop <- patchwork::wrap_plots(
+  list(attr(vul_summaryABC, "plot"), attr(env_summaryABC, "plot"), attr(disp_summaryABC, "plot")),
+  ncol = 1, heights = c(6, 3, 1)
+)
+
+ggplot2::ggsave(
+  file.path(BASE_DIR, "plots/ts/ga_final_pop_distributions_gag_combined_ABC.png"),
+  plot = combined_gag_pop, width = 20, height = 24, dpi = 200, units = "in"
+)
+
 
 ## ---- PART 4: observed vs. predicted time series ----------------------------------------
 
