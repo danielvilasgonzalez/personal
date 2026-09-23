@@ -122,6 +122,79 @@ redgrp_param_summary <- plot_ga_final_pop_distributions(
 )
 print(redgrp_param_summary)
 
+#multiple configuration plots
+#1
+vul_summary <- plot_ga_final_pop_distributions(
+  gapop_final = gapop_final, gapop_init = gapop_init, ga_runs = ga_runs,
+  catalog = catalog, group_names = group_names, species_patterns = "gag",
+  types = "vul", facet_ncol = 6,
+  png_file = "ga_final_pop_distributions_gag_vul_opt1.png",
+  plots_dir = file.path(BASE_DIR, "plots/ts")
+)
+
+envrt_summary <- plot_ga_final_pop_distributions(
+  gapop_final = gapop_final, gapop_init = gapop_init, ga_runs = ga_runs,
+  catalog = catalog, group_names = group_names, species_patterns = "gag",
+  types = c("env", "redtide", "disp"), facet_ncol = 6,
+  png_file = "ga_final_pop_distributions_gag_envrtdisp_opt1.png",
+  plots_dir = file.path(BASE_DIR, "plots/ts")
+)
+#2
+vul_summary2 <- plot_ga_final_pop_distributions(
+  gapop_final = gapop_final, gapop_init = gapop_init, ga_runs = ga_runs,
+  catalog = catalog, group_names = group_names, species_patterns = "gag",
+  types = "vul", facet_ncol = 6, base_size = 16,
+  png_file = "ga_final_pop_distributions_gag_vul_opt2.png",
+  plots_dir = file.path(BASE_DIR, "plots/ts")
+)
+
+envrt_summary2 <- plot_ga_final_pop_distributions(
+  gapop_final = gapop_final, gapop_init = gapop_init, ga_runs = ga_runs,
+  catalog = catalog, group_names = group_names, species_patterns = "gag",
+  types = c("env", "redtide", "disp"), facet_ncol = 6, base_size = 16,
+  png_file = "ga_final_pop_distributions_gag_envrtdisp_opt2.png",
+  plots_dir = file.path(BASE_DIR, "plots/ts")
+)
+#3
+# pass 1: get the summary table only (its own plot output isn't used)
+full_summary <- plot_ga_final_pop_distributions(
+  gapop_final = gapop_final, gapop_init = gapop_init, ga_runs = ga_runs,
+  catalog = catalog, group_names = group_names, species_patterns = "gag",
+  facet_ncol = 8, png_file = "ga_final_pop_distributions_gag_FULL_temp.png",
+  plots_dir = file.path(BASE_DIR, "plots/ts")
+)
+
+# select the most extreme parameters: at_bound == TRUE, OR the 15 furthest from
+# the range's midpoint (50%) regardless of bound status
+full_summary$dist_from_mid <- abs(full_summary$pct_of_range - 50)
+top_params <- unique(c(
+  full_summary$param[full_summary$at_bound],
+  full_summary$param[order(-full_summary$dist_from_mid)][1:15]
+))
+
+# pass 2: subset gapop_final's own columns to just those parameters (plus
+# gapop_row), then call again with species_patterns/types left NULL since the
+# column subset already does the filtering
+gapop_final_top <- gapop_final[, c("gapop_row", top_params)]
+
+top_summary <- plot_ga_final_pop_distributions(
+  gapop_final = gapop_final_top, gapop_init = gapop_init, ga_runs = ga_runs,
+  catalog = catalog, group_names = group_names, species_patterns = NULL,
+  facet_ncol = 5, base_size = 16,
+  png_file = "ga_final_pop_distributions_gag_HEADLINE.png",
+  plots_dir = file.path(BASE_DIR, "plots/ts")
+)
+print(top_summary)
+
+
+
+
+
+
+
+
+
+
 ## ---- PART 4: observed vs. predicted time series ----------------------------------------
 
 base_dir <- file.path(BASE_DIR, "sp03_5min_phase3_init/")
