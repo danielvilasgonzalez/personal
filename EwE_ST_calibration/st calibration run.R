@@ -123,73 +123,52 @@ redgrp_param_summary <- plot_ga_final_pop_distributions(
 )
 print(redgrp_param_summary)
 
-#multiple configuration plots
-#1
-vul_summary <- plot_ga_final_pop_distributions(
-  gapop_final = gapop_final, gapop_init = gapop_init, ga_runs = ga_runs,
-  catalog = catalog, group_names = group_names, species_patterns = "gag",
-  types = "vul", facet_ncol = 6,
-  png_file = "ga_final_pop_distributions_gag_vul_opt1.png",
-  plots_dir = file.path(BASE_DIR, "plots/ts")
-)
-
-envrt_summary <- plot_ga_final_pop_distributions(
-  gapop_final = gapop_final, gapop_init = gapop_init, ga_runs = ga_runs,
-  catalog = catalog, group_names = group_names, species_patterns = "gag",
-  types = c("env", "redtide", "disp"), facet_ncol = 6,
-  png_file = "ga_final_pop_distributions_gag_envrtdisp_opt1.png",
-  plots_dir = file.path(BASE_DIR, "plots/ts")
-)
-#2
+#multiple configuration plots -- option 2 (stacked vul + env/red-tide/disp), the one
+# that reads best; options 1 and 3 (side-by-side and headline-only variants) removed
 vul_summary2 <- plot_ga_final_pop_distributions(
   gapop_final = gapop_final, gapop_init = gapop_init, ga_runs = ga_runs,
   catalog = catalog, group_names = group_names, species_patterns = "gag",
-  types = "vul", facet_ncol = 6, base_size = 16,
-  png_file = "ga_final_pop_distributions_gag_vul_opt2.png",
-  plots_dir = file.path(BASE_DIR, "plots/ts")
+  types = "vul", facet_ncol = 6, base_size = 20,
+  max_title_chars = 8,
+  save_plot = FALSE, plots_dir = file.path(BASE_DIR, "plots/ts"),
+  width = 6 * 3.2,
+  height = ceiling(34 / 6) * 3.2
 )
 
 envrt_summary2 <- plot_ga_final_pop_distributions(
   gapop_final = gapop_final, gapop_init = gapop_init, ga_runs = ga_runs,
   catalog = catalog, group_names = group_names, species_patterns = "gag",
-  types = c("env", "redtide", "disp"), facet_ncol = 6, base_size = 16,
-  png_file = "ga_final_pop_distributions_gag_envrtdisp_opt2.png",
-  plots_dir = file.path(BASE_DIR, "plots/ts")
-)
-#3
-# pass 1: get the summary table only (its own plot output isn't used)
-full_summary <- plot_ga_final_pop_distributions(
-  gapop_final = gapop_final, gapop_init = gapop_init, ga_runs = ga_runs,
-  catalog = catalog, group_names = group_names, species_patterns = "gag",
-  facet_ncol = 8, png_file = "ga_final_pop_distributions_gag_FULL_temp.png",
-  plots_dir = file.path(BASE_DIR, "plots/ts")
+  types = c("env", "redtide", "disp"), facet_ncol = 6, base_size = 20,
+  max_title_chars = 8,
+  save_plot = FALSE, plots_dir = file.path(BASE_DIR, "plots/ts"),
+  width = 6 * 3.2,
+  height = ceiling(20 / 6) * 3.2
 )
 
-# select the most extreme parameters: at_bound == TRUE, OR the 15 furthest from
-# the range's midpoint (50%) regardless of bound status
-full_summary$dist_from_mid <- abs(full_summary$pct_of_range - 50)
-top_params <- unique(c(
-  full_summary$param[full_summary$at_bound],
-  full_summary$param[order(-full_summary$dist_from_mid)][1:15]
-))
-
-# pass 2: subset gapop_final's own columns to just those parameters (plus
-# gapop_row), then call again with species_patterns/types left NULL since the
-# column subset already does the filtering
-gapop_final_top <- gapop_final[, c("gapop_row", top_params)]
-
-top_summary <- plot_ga_final_pop_distributions(
-  gapop_final = gapop_final_top, gapop_init = gapop_init, ga_runs = ga_runs,
-  catalog = catalog, group_names = group_names, species_patterns = NULL,
-  facet_ncol = 5, base_size = 16,
-  png_file = "ga_final_pop_distributions_gag_HEADLINE.png",
-  plots_dir = file.path(BASE_DIR, "plots/ts")
+# stacked, matching width: both calls above use exactly the same panel width.
+# Each individual panel is 3.2 x 3.2 inches, so vulnerability, environmental,
+# red-tide, and dispersal panels have the same physical plotting dimensions.
+combined_opt2 <- patchwork::wrap_plots(
+  list(attr(vul_summary2, "plot"), attr(envrt_summary2, "plot")),
+  ncol = 1,
+  heights = c(
+    ceiling(34 / 6),
+    ceiling(20 / 10)
+  ),
+  axes = "collect"
 )
-print(top_summary)
 
+ggplot2::ggsave(
+  file.path(BASE_DIR, "plots/ts/ga_final_pop_distributions_gag_opt2_stacked.png"),
+  plot = combined_opt2,
+  width = 5 * 3.2,
+  height = (ceiling(34 / 6) + ceiling(20 / 10)) * 2.5,
+  dpi = 200,
+  units = "in"
+)
 #4 -- composed A/B/C multi-panel figure: vulnerabilities, environmental + red-tide
 # responses, and dispersal rates as three lettered sections of one combined figure,
-# building on option 2's settings (base_size = 16). Each sub-call uses save_plot =
+# building on option 2's settings (base_size = 20). Each sub-call uses save_plot =
 # FALSE so only the final combined figure gets written to disk, not three separate
 # intermediate PNGs; each section's own plot object is retrieved via attr(..., "plot")
 # after the call, since the function's ordinary return value stays a plain summary
@@ -199,7 +178,7 @@ print(top_summary)
 vul_summaryABC <- plot_ga_final_pop_distributions(
   gapop_final = gapop_final, gapop_init = gapop_init, ga_runs = ga_runs,
   catalog = catalog, group_names = group_names, species_patterns = "gag",
-  types = "vul", facet_ncol = 6, base_size = 16,
+  types = "vul", facet_ncol = 6, base_size = 20,
   overall_title = "A) Vulnerabilities",
   save_plot = FALSE, plots_dir = file.path(BASE_DIR, "plots/ts")
 )
@@ -207,7 +186,7 @@ vul_summaryABC <- plot_ga_final_pop_distributions(
 env_summaryABC <- plot_ga_final_pop_distributions(
   gapop_final = gapop_final, gapop_init = gapop_init, ga_runs = ga_runs,
   catalog = catalog, group_names = group_names, species_patterns = "gag",
-  types = c("env", "redtide"), facet_ncol = 6, base_size = 16,
+  types = c("env", "redtide"), facet_ncol = 6, base_size = 20,
   overall_title = "B) Environmental and red-tide responses",
   save_plot = FALSE, plots_dir = file.path(BASE_DIR, "plots/ts")
 )
@@ -215,7 +194,7 @@ env_summaryABC <- plot_ga_final_pop_distributions(
 disp_summaryABC <- plot_ga_final_pop_distributions(
   gapop_final = gapop_final, gapop_init = gapop_init, ga_runs = ga_runs,
   catalog = catalog, group_names = group_names, species_patterns = "gag",
-  types = "disp", facet_ncol = 6, base_size = 16,
+  types = "disp", facet_ncol = 6, base_size = 20,
   overall_title = "C) Dispersal rates",
   save_plot = FALSE, plots_dir = file.path(BASE_DIR, "plots/ts")
 )
