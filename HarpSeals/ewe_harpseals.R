@@ -22,7 +22,7 @@ library(ggplot2)
 ## slashes work fine in R on Windows too) -- then re-run. The
 ## dir.exists() check right after this now fails loudly and clearly
 ## instead of producing that cryptic error if the path is still wrong.
-root_dir <- "/Users/daniel/Desktop/HarpSeals/outputs/sim/"
+root_dir <- "C:/Users/danie/Desktop/HarpSeals/outputs/sim/"
 
 if(!dir.exists(root_dir)){
   stop(
@@ -32,6 +32,29 @@ if(!dir.exists(root_dir)){
     "while running on Windows, or vice versa) -- edit root_dir near ",
     "the top of this script to point at your actual outputs/sim ",
     "folder on THIS machine before re-running."
+  )
+}
+
+## Where generated figures (ggsave) and CSV deliverables (fwrite) get
+## written -- kept SEPARATE from root_dir (which is where this script
+## READS the actual EwE Simulation/Model output folders from, under
+## outputs/sim/). Per request, figures and CSVs now go one level up,
+## directly under outputs/, not inside the sim/ subfolder alongside
+## the raw EwE output folders. Derived from root_dir with dirname()
+## rather than a second hardcoded path, so the two can't drift out of
+## sync if root_dir is ever edited -- dirname() strips the trailing
+## "sim/" (or "sim") regardless of the trailing slash, so this always
+## resolves to ".../HarpSeals/outputs" on any machine where root_dir
+## itself is already set correctly.
+output_dir <- dirname(root_dir)
+
+if(!dir.exists(output_dir)){
+  stop(
+    "output_dir does not exist on this machine: '", output_dir, "'. ",
+    "This is derived from root_dir via dirname() and should already ",
+    "exist as root_dir's parent folder -- if this fires, root_dir ",
+    "itself is probably set to something unexpected; check its value ",
+    "near the top of this script."
   )
 }
 
@@ -144,7 +167,8 @@ sensitivity_model_colors <- c(
   "qb+15"         = "#fd8d3c",
   "qb+30"         = "#a63603",
   "diet-20"       = "#238b45",
-  "diet-20pisciv" = "#88419d"
+  "diet-20pisciv" = "#88419d",
+  "qb-30_diet_cod" = "#bf812d"
 )
 
 ## Single authoritative list of every Model variant this script knows
@@ -178,7 +202,17 @@ model_levels_all <- c(
   "PB-50",
   "PB-25",
   "PB+25",
-  "PB+50"
+  "PB+50",
+  ## Added for the exploratory Atlantic cod diet/predation sensitivity
+  ## run requested by the client: harp seal Q/B reduced 30% (same
+  ## reduction as "qb-30" above), combined with the empirically-
+  ## specified cod diet split. Run on a separate machine ("danie"),
+  ## not yet present in root_dir as of this edit -- added here first,
+  ## per this list's own stated purpose ("add any new Model variant
+  ## here once, and every figure that references model_levels_all
+  ## picks it up"), so the script won't silently NA-collapse this
+  ## Model once its output folder exists and is read in.
+  "qb-30_diet_cod"
 )
 
 ## Maps every combined Simulation onto one of THREE display periods --
@@ -210,7 +244,8 @@ period_levels <- c("1985-1988", "2013-2015", "2018-2020")
 ## the Q/B range) -- this one is for the *colour* legend specifically.
 
 model_order_baseline_first <- c(
-  "baseline", "qb-30", "qb-15", "qb+15", "qb+30", "diet-20", "diet-20pisciv"
+  "baseline", "qb-30", "qb-15", "qb+15", "qb+30", "diet-20", "diet-20pisciv",
+  "qb-30_diet_cod"
 )
 
 ## ---- Helper: build a 3-category Period time series from a table
@@ -1483,7 +1518,7 @@ if(nrow(other_pisciv_check) == 0){
 
 fwrite(
   results,
-  file.path(root_dir,
+  file.path(output_dir,
             "HarpSeal_Predation_vs_Fishing_AllModels.csv")
 )
 
@@ -1626,7 +1661,7 @@ if(length(missing_biomass_sims) > 0){
 
 fwrite(
   biomass_results,
-  file.path(root_dir,
+  file.path(output_dir,
             "HarpSeal_Biomass_BasicEstimates_AllModels.csv")
 )
 
@@ -1742,6 +1777,16 @@ find_col <- function(dt, pattern, file_label){
 ## "2018-2020_8020" Simulation won't be computable until both rows are
 ## added below -- add them here once you have the equivalent
 ## HarpSealTEST.xlsx-style values for the N80/S20 runs.
+##
+## GAP (2nd): no entries yet for Model == "qb-30_diet_cod" either, for
+## any Simulation. QB_seal for it CAN be derived once the run exists
+## (baseline QB_seal x 0.70, same rule as "qb-30" -- see qb_multiplier
+## above), but DietFraction_CodAdult cannot be guessed; it depends on
+## exactly what cod diet value was set for this run on the other
+## machine. Add the real rows here (both QB_seal and
+## DietFraction_CodAdult, for whichever Simulations it was actually run
+## on) once that run exists -- until then, the Q/Y loop will skip this
+## Model the same graceful way it skips N80/S20 above.
 
 seal_qb_diet_lookup <- data.table(
   Simulation = rep(
@@ -1795,7 +1840,11 @@ qb_multiplier <- c(
   "qb+15"         = 1.15,
   "qb+30"         = 1.30,
   "diet-20"       = 1.00,
-  "diet-20pisciv" = 1.00
+  "diet-20pisciv" = 1.00,
+  ## Same Q/B reduction as "qb-30" (0.70x baseline) -- this run combines
+  ## that with a cod-specific diet change, which this multiplier doesn't
+  ## capture (it only scales QB_seal, not DietFraction_CodAdult/Juv).
+  "qb-30_diet_cod" = 0.70
 )
 
 ## Reference only -- P/B perturbation runs (PB+50/-50/+25/-25) still
@@ -2043,7 +2092,7 @@ cat("=========================================================================\n
 
 fwrite(
   seal_qb_all_models,
-  file.path(root_dir, "HarpSeal_QB_AllModels.csv")
+  file.path(output_dir, "HarpSeal_QB_AllModels.csv")
 )
 
 ## ---- Step 1b: read & cache each Simulation's BASELINE Diet
@@ -2513,7 +2562,7 @@ setorder(group_status_table, Group, Simulation, Model)
 
 fwrite(
   group_status_table,
-  file.path(root_dir, "HarpSeal_GroupStatus_AllModels.csv")
+  file.path(output_dir, "HarpSeal_GroupStatus_AllModels.csv")
 )
 
 cat("\n===== Group status: counts by Status (all Groups x Simulations x Models) =====\n")
@@ -2532,7 +2581,7 @@ group_status_wide <- dcast(
 
 fwrite(
   group_status_wide,
-  file.path(root_dir, "HarpSeal_GroupStatus_AllModels_Wide.csv")
+  file.path(output_dir, "HarpSeal_GroupStatus_AllModels_Wide.csv")
 )
 
 cat("\nFull long-format table saved to HarpSeal_GroupStatus_AllModels.csv",
@@ -2665,7 +2714,7 @@ setorder(ns_structure_check, CombinedSimulation, Reason, Group)
 
 fwrite(
   ns_structure_check,
-  file.path(root_dir, "HarpSeal_NS_StructuralPresence_Baseline.csv")
+  file.path(output_dir, "HarpSeal_NS_StructuralPresence_Baseline.csv")
 )
 
 cat("\n===== N/S structural presence check (baseline model): why does a",
@@ -2775,7 +2824,7 @@ if(exists("baseline_diet_cache") && nrow(baseline_diet_cache) > 0){
   
   fwrite(
     west_et_al_check,
-    file.path(root_dir, "HarpSeal_WestEtAl_DietSpecies_Check.csv")
+    file.path(output_dir, "HarpSeal_WestEtAl_DietSpecies_Check.csv")
   )
   
 } else {
@@ -3291,7 +3340,7 @@ if(is.null(qy_results) || nrow(qy_results) == 0){
   fwrite(
     qy_results,
     file.path(
-      root_dir,
+      output_dir,
       "HarpSeal_ConsumptionYield_QY_AllModels.csv"
     )
   )
@@ -3784,7 +3833,7 @@ if(exists("qy_results") && nrow(qy_results) > 0){
   
   fwrite(
     ratio_compare,
-    file.path(root_dir, "HarpSeal_M2F_vs_QY_Ratios_AllModels.csv")
+    file.path(output_dir, "HarpSeal_M2F_vs_QY_Ratios_AllModels.csv")
   )
   
   cat("\nM2/F vs Q/Y ratio comparison (head):\n")
@@ -3815,7 +3864,7 @@ if(exists("qy_results") && nrow(qy_results) > 0){
   
   fwrite(
     species_level_summary,
-    file.path(root_dir, "HarpSeal_SpeciesLevel_SealPrey_vs_Exploited.csv")
+    file.path(output_dir, "HarpSeal_SpeciesLevel_SealPrey_vs_Exploited.csv")
   )
   
   cat("\nSpecies-level summary (seal prey vs exploited seal prey):\n")
@@ -4037,7 +4086,7 @@ setcolorder(
 cat("\n===== Table 2: M2/F and Q/Y by functional group, baseline model =====\n")
 print(table2_final)
 
-fwrite(table2_final, file.path(root_dir, "Table2_M2F_QY_ByFunctionalGroup.csv"))
+fwrite(table2_final, file.path(output_dir, "Table2_M2F_QY_ByFunctionalGroup.csv"))
 
 ## West et al. (2025) published only the single aggregate headline
 ## values per period (M2/F = 1.3, Q/Y = 1.7 for 1985-1988; M2/F = 17,
@@ -4055,7 +4104,7 @@ table2_data[, AboveWestEtAl := fifelse(
   )
 )]
 
-fwrite(table2_data, file.path(root_dir, "Table2_M2F_QY_ByFunctionalGroup_Long.csv"))
+fwrite(table2_data, file.path(output_dir, "Table2_M2F_QY_ByFunctionalGroup_Long.csv"))
 
 cat("\nTable 2 saved: 'Table2_M2F_QY_ByFunctionalGroup.csv' (wide, ready",
     "to paste into the manuscript table) and",
@@ -4157,7 +4206,7 @@ if(exists("results") && exists("qy_results") && exists("biomass_results")){
   
   fwrite(
     consumption_check,
-    file.path(root_dir, "HarpSeal_EcopathImplied_vs_Reconstructed_Consumption_AllSpecies.csv")
+    file.path(output_dir, "HarpSeal_EcopathImplied_vs_Reconstructed_Consumption_AllSpecies.csv")
   )
   
   cat("\n===== All-species check: Ecopath-implied vs reconstructed seal consumption =====\n")
@@ -4185,7 +4234,7 @@ if(exists("results") && exists("qy_results") && exists("biomass_results")){
   
   fwrite(
     consumption_check_summary,
-    file.path(root_dir, "HarpSeal_EcopathImplied_vs_Reconstructed_Consumption_Summary.csv")
+    file.path(output_dir, "HarpSeal_EcopathImplied_vs_Reconstructed_Consumption_Summary.csv")
   )
   
   cat("\n===== Per-Simulation/Model summary: how CONSTANT is the Ecopath-implied /",
@@ -4360,7 +4409,7 @@ if(exists("results") && exists("qy_results") && exists("biomass_results")){
   
   fwrite(
     growth_wide,
-    file.path(root_dir, "HarpSeal_M2F_vs_QY_GrowthDecomposition.csv")
+    file.path(output_dir, "HarpSeal_M2F_vs_QY_GrowthDecomposition.csv")
   )
   
   ## IMPORTANT, READ BEFORE INTERPRETING THE PRINTED TABLE: Biomass is
@@ -4596,7 +4645,7 @@ if(
     
     fwrite(
       ns_check,
-      file.path(root_dir, "HarpSeal_NS_AreaWeighting_JensenGap_Check.csv")
+      file.path(output_dir, "HarpSeal_NS_AreaWeighting_JensenGap_Check.csv")
     )
     
     cat("\n===== Does North/South heterogeneity explain the GrowthRatio cross-check",
@@ -4774,7 +4823,7 @@ results[
 # # cat("\n", p1_caption, "\n", sep = "")
 # # 
 # # ggsave(
-# #   file.path(root_dir, "D1_Fig1_MortalityBySpecies.png"),
+# #   file.path(output_dir, "D1_Fig1_MortalityBySpecies.png"),
 # #   p1,
 # #   width = 18,
 # #   height = max(10, 2 * ceiling(n_groups_d1f1 / 5)),
@@ -4844,7 +4893,7 @@ results[
 # cat("\n", p2_caption, "\n", sep = "")
 # 
 # ggsave(
-#   file.path(root_dir, "D1_Fig2_M2FRatioBySpecies.png"),
+#   file.path(output_dir, "D1_Fig2_M2FRatioBySpecies.png"),
 #   p2,
 #   width = 18,
 #   height = max(10, 2 * ceiling(n_groups_d1f2 / 5)),
@@ -4880,7 +4929,7 @@ print(summary_table)
 fwrite(
   summary_table,
   file.path(
-    root_dir,
+    output_dir,
     "Summary_HarpSeal_Predation_vs_Fishing.csv"
   )
 )
@@ -4989,7 +5038,7 @@ fwrite(
 # cat("\n", p3_caption, "\n", sep = "")
 # 
 # ggsave(
-#   file.path(root_dir, "D1_Fig3_M2FHeatmapAllSpecies.png"),
+#   file.path(output_dir, "D1_Fig3_M2FHeatmapAllSpecies.png"),
 #   p3,
 #   width = 14,
 #   height = 10,
@@ -5075,7 +5124,7 @@ fwrite(
 # 
 # ggsave(
 #   file.path(
-#     root_dir,
+#     output_dir,
 #     "D1_Fig4_M2FTimeSeriesExploited.png"
 #     
 #   ),
@@ -5086,7 +5135,7 @@ fwrite(
 # )
 ###### NCAM
 
-load("/Users/daniel/Desktop/HarpSeals/NCAM/ncam_2019.RData")   # object is named ncam_2019
+load("C:/Users/danie/Desktop/HarpSeals/NCAM/ncam_2019.RData")   # object is named ncam_2019
 
 fit <- ncam_2019          # (this is what the dashboard code calls the object internally)
 
@@ -5143,7 +5192,10 @@ head(F_at_age)
 # head(F_4plus)
 
 #=========================================================
-# Biomass-weighted mortality rates for ages 4+
+# Biomass-weighted mortality rates for the ADULT partition
+# (ages >= 3, i.e. 36 months+ -- the juvenile/adult split age used
+# consistently throughout this NCAM section, matching the EwE
+# Multi-Stanza juvenile/adult split)
 #=========================================================
 
 # Match years
@@ -5162,8 +5214,11 @@ M <- M_matrix[yrs, ]
 # Biomass proportions at all ages
 B_prop <- B / rowSums(B)
 
-# Ages to average
-ages <- as.character(4:14)
+# Adult ages to average: the juvenile/adult split is at 36 months (age 3),
+# so "adult" = age 3 and older. (Kept the historical name `ages` / the
+# `_4plus` variable names below for backward compatibility with the rest
+# of this block -- they now mean "age 3+ / 36 months+", not literally 4+.)
+ages <- as.character(3:14)
 
 # Renormalize biomass proportions within selected ages
 weights <- B_prop[, ages]
@@ -5231,6 +5286,563 @@ if(length(missing_periods) > 0){
   )
   
 }
+
+#=========================================================
+# Juvenile vs Adult Atlantic Cod -- mortality AND biomass
+# comparison from NCAM, pooled by the same three periods
+#=========================================================
+## Added per request: mirrors the ages 4+ ("adult") block above,
+## using the complementary ages 1:3 as "juvenile" (NCAM's own
+## age-structured stock assessment, not an EwE quantity), then pools
+## both juvenile and adult F/M/Z by the same three periods
+## (1985-1988, 2013-2015, 2018-2020) so they can be directly compared
+## against the EwE stanza's own Tot. mort. inputs (0.302 juv / 0.306
+## adult in the 1985-1988 model; 0.402 / 0.402, confirmed identical in
+## the Multi-Stanza dialog, for 2018-2020). Also adds the analogous
+## juvenile-vs-adult BIOMASS comparison, using the same age split, to
+## compare against the EwE stanza's own biomass inputs (0.200 t/km^2
+## juvenile / 2.180 t/km^2 adult in the 2018-2020 model).
+
+## ---- Juvenile biomass-weighted mortality ----
+## FIXED: hardcoded ages_juv <- as.character(1:3) assumed NCAM's
+## youngest modeled age class is 1 -- it errored with "subscript out
+## of bounds" because that's not necessarily true (many age-structured
+## assessments start at a recruitment age of 2, 3, or older, not 1).
+## Derived instead from whatever ages ACTUALLY exist as columns in
+## B_at_age (set from fit$tmb.data$ages at the top of this NCAM
+## section, before `ages` got overwritten to the adult 3:14 range
+## below) -- "juvenile" here means every modeled age younger than the
+## adult cutoff, whatever the youngest one turns out to be.
+## Split age = 3 (36 months), matching the EwE Multi-Stanza
+## juvenile/adult split used for every partition in this section.
+adult_age_cutoff <- 3
+all_ages_numeric <- suppressWarnings(as.integer(colnames(B_at_age)))
+juv_ages_numeric <- sort(all_ages_numeric[
+  !is.na(all_ages_numeric) & all_ages_numeric < adult_age_cutoff
+])
+
+if(length(juv_ages_numeric) == 0){
+  stop(
+    "No NCAM age classes younger than ", adult_age_cutoff, " were found",
+    " in colnames(B_at_age) (", paste(colnames(B_at_age), collapse = ", "),
+    "). Check fit$tmb.data$ages for the actual youngest modeled age",
+    " and adjust adult_age_cutoff / the juvenile range accordingly."
+  )
+}
+
+cat(
+  "\nJuvenile age range for NCAM comparison (ages younger than ",
+  adult_age_cutoff, "): ", paste(juv_ages_numeric, collapse = ", "),
+  "\n", sep = ""
+)
+
+ages_juv <- as.character(juv_ages_numeric)
+weights_juv <- B_prop[, ages_juv, drop = FALSE]
+weights_juv <- weights_juv / rowSums(weights_juv)
+
+F_juv <- rowSums(weights_juv * F[, ages_juv, drop = FALSE])
+Z_juv <- rowSums(weights_juv * Z[, ages_juv, drop = FALSE])
+M_juv <- rowSums(weights_juv * M[, ages_juv, drop = FALSE])
+
+mortality_summary_juv <- data.frame(
+  Year = as.numeric(yrs), F = F_juv, M = M_juv, Z = Z_juv
+)
+
+head(mortality_summary_juv)
+
+## ---- Pool juvenile + adult mortality by period, side by side ----
+dt_adult <- as.data.table(mortality_summary)
+dt_juv   <- as.data.table(mortality_summary_juv)
+
+label_period_juvadult <- function(x) {
+  fifelse(x %in% 1985:1988, "1985-1988",
+          fifelse(x %in% 2013:2015, "2013-2015",
+                  fifelse(x %in% 2018:2020, "2018-2020", NA_character_)))
+}
+
+dt_adult[, Period := label_period_juvadult(Year)]
+dt_juv[,   Period := label_period_juvadult(Year)]
+
+period_means_adult <- dt_adult[!is.na(Period), lapply(.SD, mean), by = Period,
+                               .SDcols = c("F", "M", "Z")]
+period_means_juv   <- dt_juv[!is.na(Period), lapply(.SD, mean), by = Period,
+                             .SDcols = c("F", "M", "Z")]
+
+setnames(period_means_adult, c("F","M","Z"), c("F_adult","M_adult","Z_adult"))
+setnames(period_means_juv,   c("F","M","Z"), c("F_juv","M_juv","Z_juv"))
+
+mortality_comparison_juvadult <- merge(period_means_adult, period_means_juv, by = "Period")
+mortality_comparison_juvadult[, Z_ratio_juv_to_adult := Z_juv / Z_adult]
+
+cat("\n===== NCAM total mortality (Z), juvenile vs adult cod, by period =====\n")
+cat("(Compare against the EwE stanza's own Tot. mort. inputs: 0.302 juv /",
+    "0.306 adult for 1985-1988, and 0.402 / 0.402 -- confirmed identical",
+    "in the Multi-Stanza Groups dialog -- for 2018-2020.)\n\n")
+print(mortality_comparison_juvadult)
+cat("========================================================================\n")
+
+fwrite(
+  mortality_comparison_juvadult,
+  file.path(output_dir, "NCAM_CodMortality_JuvenileVsAdult_ByPeriod.csv")
+)
+
+## ---- Juvenile vs adult BIOMASS comparison from NCAM, same age split,
+## same periods -- compare against the EwE stanza's own biomass inputs
+## (0.200 t/km^2 juvenile / 2.180 t/km^2 adult, 2018-2020 model) ----
+B_juv_total   <- rowSums(B_at_age[yrs, ages_juv, drop = FALSE])
+B_adult_total <- rowSums(B_at_age[yrs, ages])   # 'ages' = 3:14 (36mo+), defined above
+
+biomass_summary_juvadult <- data.table(
+  Year = as.numeric(yrs),
+  B_juv = B_juv_total,
+  B_adult = B_adult_total
+)
+biomass_summary_juvadult[, Period := label_period_juvadult(Year)]
+biomass_summary_juvadult[, B_ratio_juv_to_adult := B_juv / B_adult]
+
+period_means_biomass_juvadult <- biomass_summary_juvadult[!is.na(Period),
+                                                          lapply(.SD, mean), by = Period,
+                                                          .SDcols = c("B_juv", "B_adult", "B_ratio_juv_to_adult")]
+
+cat("\n===== NCAM biomass (ages 1-3 vs ages 4-14), juvenile vs adult cod, by period =====\n")
+cat("(Compare against the EwE stanza's own biomass inputs: 0.200 t/km^2",
+    "juvenile / 2.180 t/km^2 adult, 2018-2020 model.)\n\n")
+print(period_means_biomass_juvadult)
+cat("===========================================================================\n")
+
+fwrite(
+  period_means_biomass_juvadult,
+  file.path(output_dir, "NCAM_CodBiomass_JuvenileVsAdult_ByPeriod.csv")
+)
+
+## ---- Combined table: mortality + biomass comparison in one place ----
+full_comparison_juvadult <- merge(
+  mortality_comparison_juvadult, period_means_biomass_juvadult, by = "Period"
+)
+
+cat("\n===== Combined NCAM juvenile-vs-adult comparison (mortality + biomass) =====\n")
+print(full_comparison_juvadult)
+cat("=================================================================================\n")
+
+fwrite(
+  full_comparison_juvadult,
+  file.path(output_dir, "NCAM_CodMortalityAndBiomass_JuvenileVsAdult_ByPeriod.csv")
+)
+
+## ---- Standalone 2018-2020-only mortality numbers (adult vs juvenile) ----
+## `mortality_comparison_juvadult` above already has one row per period
+## (1985-1988 / 2013-2015 / 2018-2020) with Z_adult, Z_juv, F_*, M_* --
+## this just pulls the 2018-2020 row out on its own so it doesn't have to
+## be found inside the 3-row table.
+cod_Z_2018_2020 <- mortality_comparison_juvadult[Period == "2018-2020"]
+
+cat("\n===== NCAM total mortality (Z), Atlantic cod, 2018-2020 only =====\n")
+cat("Adult Z   (ages", paste(range(as.integer(ages)), collapse = "-"), "minus juv):",
+    round(cod_Z_2018_2020$Z_adult, 4), "\n")
+cat("Juvenile Z (ages", paste(range(juv_ages_numeric), collapse = "-"), "):",
+    round(cod_Z_2018_2020$Z_juv, 4), "\n")
+cat("Juv:Adult Z ratio:", round(cod_Z_2018_2020$Z_ratio_juv_to_adult, 4), "\n")
+cat("====================================================================\n")
+
+fwrite(
+  cod_Z_2018_2020,
+  file.path(output_dir, "NCAM_CodMortality_JuvenileVsAdult_2018_2020_only.csv")
+)
+
+#=========================================================
+# NCAM growth / maturity parameters -- K, Winf, weight-at-age (Wmat),
+# and spawning (maturity) proportion of juvenile cod at age 3 (~36 months)
+#=========================================================
+## IMPORTANT: this block was written WITHOUT being able to inspect the
+## actual ncam_2019.RData object's field names (it isn't available in
+## the sandbox this script was edited in), so it can't be guaranteed to
+## match on the first try the way the F/M/Z/biomass blocks above could
+## (those were confirmed against your pasted error output). Run this
+## block once: the diagnostic `cat()`/`str()` calls below will print
+## the real field names inside `fit$tmb.data` (and `fit$pl` if present)
+## so you can see immediately whether the guessed names matched. If a
+## guessed name is wrong, tell me what the diagnostic print shows for
+## weight-at-age / maturity-at-age and I'll fix the exact field name
+## in one edit.
+
+cat("\n===== NCAM fit object -- field names (diagnostic) =====\n")
+cat("names(fit$tmb.data):\n")
+print(names(fit$tmb.data))
+cat("\nnames(fit$rep):\n")
+print(names(fit$rep))
+if(!is.null(fit$pl)){
+  cat("\nnames(fit$pl):\n")
+  print(names(fit$pl))
+}
+cat("=========================================================\n")
+
+## ---- Weight-at-age (candidate field names, first match wins) ----
+## CONFIRMED against your diagnostic printout: fit$tmb.data has "weight"
+## and "mat" -- both matched on the first candidate list, no renaming
+## needed.
+.wmat_candidates <- c("stockMeanWeight", "weight", "weightAtAge", "W", "Wmat", "sw")
+wmat_field <- .wmat_candidates[.wmat_candidates %in% names(fit$tmb.data)][1]
+
+## ---- Maturity-at-age / proportion mature (candidate field names) ----
+.mat_candidates <- c("propMat", "mat", "maturity", "pm", "Mat")
+mat_field <- .mat_candidates[.mat_candidates %in% names(fit$tmb.data)][1]
+
+## ---- Helper: align a tmb.data age/time matrix without ASSUMING its
+## exact dimensions match length(years) x length(all_ages_numeric).
+## FIXED: the first version of this block hard-assigned
+## `rownames(W_matrix) <- years; colnames(W_matrix) <- all_ages_numeric`
+## and errored with "la longitud de 'dimnames' [1] no es igual a la
+## extensión del arreglo" -- this SAM-style object also carries
+## `years_plus1` (one extra row beyond the last assessment year, used
+## for projections: see `proj_years`/`doproj`/`Rp_mult` in
+## names(fit$tmb.data)), so "weight"/"mat" very likely have one more
+## row than `years`. This helper detects which dimension is age,
+## transposes if needed, and labels rows with `years` if that matches,
+## or with `years_plus1` if THAT matches instead -- and if neither
+## matches, it leaves rows unlabeled and says so, rather than erroring.
+.align_age_year_matrix <- function(mat, field_label) {
+  d <- dim(mat)
+  cat(
+    "\n", field_label, ": raw dim() = ",
+    if (is.null(d)) "NULL (not a matrix/array)" else paste(d, collapse = " x "),
+    "\n", sep = ""
+  )
+  if (is.null(d) || length(d) != 2) return(NULL)
+  
+  n_ages  <- length(all_ages_numeric)
+  n_years <- length(years)
+  
+  if (d[1] == n_ages) {
+    mat <- t(mat)
+    d <- dim(mat)
+  }
+  
+  if (d[2] != n_ages) {
+    cat(
+      "NOTE: ", field_label, " age dimension (", d[2], " columns after",
+      " orientation check) does not match length(all_ages_numeric) = ",
+      n_ages, ". Columns NOT labeled with ages -- inspect this matrix",
+      " manually (raw dim printed above) before trusting it.\n", sep = ""
+    )
+    return(mat)
+  }
+  colnames(mat) <- all_ages_numeric
+  
+  years_plus1 <- fit$tmb.data$years_plus1
+  if (d[1] == n_years) {
+    rownames(mat) <- years
+  } else if (!is.null(years_plus1) && d[1] == length(years_plus1)) {
+    cat(
+      "NOTE: ", field_label, " has ", d[1], " rows, matching",
+      " length(fit$tmb.data$years_plus1) rather than length(years) (",
+      n_years, "). Labeling rows with years_plus1 (includes one extra",
+      " projection year beyond the last assessment year).\n", sep = ""
+    )
+    rownames(mat) <- years_plus1
+  } else {
+    cat(
+      "NOTE: ", field_label, " time dimension (", d[1], " rows) matches",
+      " neither length(years) = ", n_years, " nor length(years_plus1)",
+      if (is.null(years_plus1)) " (that field is NULL)" else paste0(" = ", length(years_plus1)),
+      ". Rows left UNLABELED -- period-pooling below will be skipped",
+      " for this matrix; inspect it manually if you need it.\n", sep = ""
+    )
+  }
+  mat
+}
+
+## ---- Fit von Bertalanffy growth curve (K, Winf) from weight-at-age ----
+if (is.na(wmat_field)) {
+  cat(
+    "\nNOTE: none of (", paste(.wmat_candidates, collapse = ", "),
+    ") were found in names(fit$tmb.data). Weight-at-age and the",
+    " K/Winf von Bertalanffy fit below are SKIPPED.\n"
+  )
+} else {
+  W_matrix <- .align_age_year_matrix(
+    fit$tmb.data[[wmat_field]], paste0("weight-at-age (field '", wmat_field, "')")
+  )
+  
+  if (is.null(W_matrix) || is.null(colnames(W_matrix))) {
+    cat("\nNOTE: weight-at-age matrix could not be aligned by age -- skipping VB K/Winf fit.\n")
+  } else {
+    cat("\n===== NCAM weight-at-age (field: '", wmat_field, "') -- head =====\n", sep = "")
+    print(head(W_matrix))
+    
+    ## W_a = Winf * (1 - exp(-K*(age - t0)))^3  (standard weight-based VB form)
+    ## Uses the mean weight-at-age across all time rows as the growth
+    ## curve input -- this doesn't require the row (year) labels to be
+    ## correct, only that columns are correctly labeled by age.
+    mean_W_at_age <- colMeans(W_matrix, na.rm = TRUE)
+    vb_df <- data.frame(age = all_ages_numeric, W = mean_W_at_age)
+    
+    ## ---- Wmat: weight AT the juvenile/adult split age (36 months / age 3) ----
+    ## EwE's Multi-Stanza Groups dialog doesn't want the whole weight-at-age
+    ## matrix -- it wants a single number: the body weight at the age the
+    ## stanzas split (Wmat), used together with Winf to set the Wmat/Winf
+    ## ratio that drives the stanza growth parameterization. Pulled here as
+    ## the empirical mean weight at `adult_age_cutoff` (= 3, 36 months) --
+    ## independent of whether the VB fit below converges.
+    if (as.character(adult_age_cutoff) %in% names(mean_W_at_age)) {
+      Wmat_empirical <- unname(mean_W_at_age[as.character(adult_age_cutoff)])
+      cat(
+        "\nWmat (mean empirical weight at age ", adult_age_cutoff,
+        ", i.e. 36 months -- the stanza split age): ",
+        round(Wmat_empirical, 4), "\n", sep = ""
+      )
+    } else {
+      Wmat_empirical <- NA_real_
+      cat(
+        "\nNOTE: age ", adult_age_cutoff, " not found among weight-at-age",
+        " columns -- Wmat (empirical) left NA.\n", sep = ""
+      )
+    }
+    
+    vb_fit <- tryCatch(
+      nls(
+        W ~ Winf * (1 - exp(-K * (age - t0)))^3,
+        data = vb_df,
+        start = list(Winf = max(vb_df$W, na.rm = TRUE) * 1.2, K = 0.3, t0 = 0)
+      ),
+      error = function(e) {
+        cat(
+          "\nNOTE: von Bertalanffy nls() fit for K/Winf failed to converge",
+          " (", conditionMessage(e), "). Try different start values, or",
+          " fit it manually from vb_df (printed above) if this matters.\n"
+        )
+        NULL
+      }
+    )
+    
+    if (!is.null(vb_fit)) {
+      vb_coefs <- coef(vb_fit)
+      ## Wmat from the fitted curve itself (smoother than the raw mean at
+      ## one age, and usable even if that exact age had a missing/noisy
+      ## empirical value) -- predicted weight at the split age.
+      Wmat_fitted <- unname(predict(
+        vb_fit, newdata = data.frame(age = adult_age_cutoff)
+      ))
+      Wmat_over_Winf <- Wmat_fitted / unname(vb_coefs["Winf"])
+      
+      cat("\n===== NCAM von Bertalanffy growth fit (from mean weight-at-age) =====\n")
+      cat("K    =", round(vb_coefs["K"], 4), "\n")
+      cat("Winf =", round(vb_coefs["Winf"], 4), "\n")
+      cat("t0   =", round(vb_coefs["t0"], 4), "\n")
+      cat("Wmat (fitted, at age", adult_age_cutoff, ") =", round(Wmat_fitted, 4), "\n")
+      cat("Wmat (empirical mean, at age", adult_age_cutoff, ") =", round(Wmat_empirical, 4), "\n")
+      cat("Wmat/Winf ratio (fitted):", round(Wmat_over_Winf, 4), "\n")
+      cat("(This is the K, Winf, and Wmat/Winf the EwE Multi-Stanza Groups",
+          "dialog asks for -- compare directly against its own inputs for",
+          "Atlantic cod.)\n")
+      cat("======================================================================\n")
+    }
+  }
+}
+
+## ---- Spawning / maturity proportion of juvenile cod at age 3 (~36 months) ----
+## NCAM ages are annual age classes, so "36 months" = age 3 -- the SAME
+## split age now used for the adult/juvenile partition everywhere else
+## in this NCAM section (`adult_age_cutoff <- 3` above). Checked against
+## `all_ages_numeric` (the FULL NCAM age range), not `ages`, because
+## `ages` has been overwritten to the adult-only partition (3:14) by
+## this point in the script.
+spawn_age_months36 <- 3
+
+if (is.na(mat_field)) {
+  cat(
+    "\nNOTE: none of (", paste(.mat_candidates, collapse = ", "),
+    ") were found in names(fit$tmb.data). Spawning/maturity proportion",
+    " at age 3 is SKIPPED.\n"
+  )
+} else if (!(spawn_age_months36 %in% all_ages_numeric)) {
+  cat(
+    "\nNOTE: age ", spawn_age_months36, " (36 months) is not among NCAM's",
+    " modeled ages (", paste(all_ages_numeric, collapse = ", "), "). Adjust",
+    " spawn_age_months36 to the nearest available age class.\n"
+  )
+} else {
+  Mat_matrix <- .align_age_year_matrix(
+    fit$tmb.data[[mat_field]], paste0("maturity-at-age (field '", mat_field, "')")
+  )
+  
+  if (is.null(Mat_matrix) || is.null(colnames(Mat_matrix)) ||
+      !(as.character(spawn_age_months36) %in% colnames(Mat_matrix))) {
+    cat("\nNOTE: maturity-at-age matrix could not be aligned by age -- skipping proportion-mature extraction.\n")
+  } else if (is.null(rownames(Mat_matrix))) {
+    cat(
+      "\nNOTE: maturity-at-age rows aren't year-labeled (see alignment note",
+      " above), so period-pooling is skipped. Raw proportion mature at",
+      " age ", spawn_age_months36, " by row position:\n", sep = ""
+    )
+    print(Mat_matrix[, as.character(spawn_age_months36)])
+  } else {
+    prop_mature_age3 <- Mat_matrix[, as.character(spawn_age_months36)]
+    
+    mat_age3_summary <- data.table(
+      Year = suppressWarnings(as.numeric(rownames(Mat_matrix))),
+      PropMature_Age3 = prop_mature_age3
+    )
+    mat_age3_summary[, Period := label_period_juvadult(Year)]
+    
+    period_means_mat_age3 <- mat_age3_summary[!is.na(Period),
+                                              .(PropMature_Age3 = mean(PropMature_Age3, na.rm = TRUE)), by = Period]
+    
+    cat("\n===== NCAM proportion mature (spawning) at age 3 (~36 months), by period =====\n")
+    print(period_means_mat_age3)
+    cat("(Compare against the EwE Multi-Stanza Groups dialog's own",
+        "'Spawning proportion' input at the juvenile/adult split age.)\n")
+    cat("================================================================================\n")
+    
+    fwrite(
+      period_means_mat_age3,
+      file.path(output_dir, "NCAM_Cod_PropMatureAge3_ByPeriod.csv")
+    )
+  }
+}
+
+## ---- Combined save: total mortality by stanza (juvenile <=36mo /
+## adult >36mo) jointly with growth (K, Winf, Wmat, Wmat/Winf) ----
+## `mortality_comparison_juvadult` already has one row per period with
+## Z_juv (stanza 0-36mo) and Z_adult (stanza >36mo). K, Winf, Wmat, and
+## Wmat/Winf are single estimates (fit/extracted once from mean
+## weight-at-age across all years, not period-specific) -- these are
+## exactly the inputs EwE's Multi-Stanza Groups dialog asks for, so
+## they're attached as repeated columns onto the same period rows: one
+## file with both stanza mortality and the growth inputs EwE wants.
+cod_stanza_mortality_growth <- copy(mortality_comparison_juvadult)
+
+if (exists("vb_coefs")) {
+  cod_stanza_mortality_growth[, K        := unname(vb_coefs["K"])]
+  cod_stanza_mortality_growth[, Winf     := unname(vb_coefs["Winf"])]
+  cod_stanza_mortality_growth[, t0       := unname(vb_coefs["t0"])]
+  cod_stanza_mortality_growth[, Wmat     := Wmat_fitted]
+  cod_stanza_mortality_growth[, WmatOverWinf := Wmat_over_Winf]
+} else {
+  cod_stanza_mortality_growth[, K        := NA_real_]
+  cod_stanza_mortality_growth[, Winf     := NA_real_]
+  cod_stanza_mortality_growth[, t0       := NA_real_]
+  cod_stanza_mortality_growth[, Wmat     := if (exists("Wmat_empirical")) Wmat_empirical else NA_real_]
+  cod_stanza_mortality_growth[, WmatOverWinf := NA_real_]
+  cat(
+    "\nNOTE: K/Winf/t0/Wmat-from-fit not available (weight-at-age field",
+    " not found, or the von Bertalanffy nls() fit didn't converge -- see",
+    " notes above). Wmat falls back to the empirical mean weight at the",
+    " split age if that was computed; Winf/K/t0/WmatOverWinf saved as NA",
+    " in NCAM_Cod_StanzaMortality_K_Winf.csv so the file still has the",
+    " mortality-by-stanza columns.\n"
+  )
+}
+
+## ---- Spawning (maturity) proportion at 36 months, by period ----
+## `period_means_mat_age3` (computed in the maturity block above) has
+## one PropMature_Age3 value per period -- unlike K/Winf/Wmat, this ISN'T
+## a single repeated constant, it genuinely varies by period, so it's
+## merged in by Period rather than assigned as one repeated value.
+if (exists("period_means_mat_age3")) {
+  cod_stanza_mortality_growth <- merge(
+    cod_stanza_mortality_growth, period_means_mat_age3, by = "Period", all.x = TRUE
+  )
+} else {
+  cod_stanza_mortality_growth[, PropMature_Age3 := NA_real_]
+  cat(
+    "\nNOTE: PropMature_Age3 (spawning proportion at 36 months) not",
+    " available (maturity field not found or not alignable -- see notes",
+    " above). Saved as NA in NCAM_Cod_StanzaMortality_K_Winf.csv.\n"
+  )
+}
+
+cat("\n===== Cod stanza total mortality (juvenile <=36mo / adult >36mo) + growth (K, Winf, Wmat, Wmat/Winf) + spawning proportion at 36mo =====\n")
+print(cod_stanza_mortality_growth)
+cat("================================================================================================================================\n")
+
+fwrite(
+  cod_stanza_mortality_growth,
+  file.path(output_dir, "NCAM_Cod_StanzaMortality_K_Winf.csv")
+)
+
+#=========================================================
+# EwE Atlantic cod stanza parametrization quality check:
+# mass-balance diagnostic (Other mort. / EE-for-predation) + NCAM
+# cross-check, original vs adjusted Basic Estimates table.
+#=========================================================
+## Values below are copied by hand from the two Ecopath "Basic
+## Estimates" tables pasted into this conversation (Atlantic cod rows
+## only -- "greater than 35cm" = adult stanza, "less than 35cm" =
+## juvenile stanza). The table's second column reads "#NAME?" in the
+## pasted spreadsheet (a broken Excel formula reference); it's F
+## (fishing mortality rate, /year), confirmed because F/Z * Z
+## reproduces it exactly in every row (e.g. juvenile original:
+## 0.158 * 0.402 = 0.0635). If EITHER Basic Estimates table changes,
+## update the four blocks below to match -- these are NOT read from
+## any file, they're the pasted snapshot.
+ewe_cod_stanza_params <- data.table(
+  Version = c("Original", "Original", "Adjusted", "Adjusted"),
+  Stanza  = c("Adult (>35cm)", "Juvenile (<35cm)", "Adult (>35cm)", "Juvenile (<35cm)"),
+  Z  = c(0.402, 0.402, 0.395, 0.432),
+  F  = c(0.0318, 0.0635, 0.0318, 0.105),
+  M2 = c(0.154, 1.413, 0.154, 2.346)
+)
+
+## Other mortality (M0) is NOT an independent input -- it's whatever is
+## left once F and M2 are subtracted from Z. A negative value here is
+## the mass-balance violation made visible: predation (M2) alone is
+## demanding more than the stanza's entire total mortality (Z) can
+## supply once fishing is accounted for.
+ewe_cod_stanza_params[, M0 := Z - F - M2]
+
+## EE for predation: M2 as a fraction of the mortality budget left
+## after fishing (Z - F). Ecopath's own EE is only "valid" at <= 1
+## (100%); anything above means more is being eaten than the
+## parametrization's own total mortality says is biologically possible.
+ewe_cod_stanza_params[, EE_predation := M2 / (Z - F)]
+
+cat("\n===== EwE Atlantic cod stanza parametrization: mass-balance check =====\n")
+print(ewe_cod_stanza_params)
+cat("(M0 < 0 or EE_predation > 1 = predation demand exceeds what Z can",
+    "supply -- a mass-balance violation, not a subjective judgment call.)\n")
+cat("==========================================================================\n")
+
+## ---- Cross-check: juvenile M2 (predation demand) vs NCAM's
+## independent total juvenile mortality (Z_juv, all causes combined) ----
+## If the model is asking juvenile cod to sustain MORE predation
+## mortality alone than NCAM's entire independent estimate of total
+## mortality (every cause combined), that's an external, independent
+## confirmation of infeasibility -- not just an internal EE flag.
+## Built via expand.grid + two single-key merges rather than a
+## by=character(0) cross-join -- more verbose, but doesn't depend on
+## exactly how data.table's merge() handles an empty `by` (couldn't be
+## verified in this sandbox, no network access to (re)install
+## data.table here to test it directly).
+juv_M2_vs_NCAM <- as.data.table(expand.grid(
+  Period  = mortality_comparison_juvadult$Period,
+  Version = ewe_cod_stanza_params[Stanza == "Juvenile (<35cm)", Version],
+  stringsAsFactors = FALSE
+))
+juv_M2_vs_NCAM <- merge(
+  juv_M2_vs_NCAM, mortality_comparison_juvadult[, .(Period, Z_juv)], by = "Period"
+)
+juv_M2_vs_NCAM <- merge(
+  juv_M2_vs_NCAM,
+  ewe_cod_stanza_params[Stanza == "Juvenile (<35cm)", .(Version, M2)],
+  by = "Version"
+)
+juv_M2_vs_NCAM[, M2_over_NCAM_Zjuv := M2 / Z_juv]
+
+cat("\n===== Juvenile cod: EwE predation demand (M2) vs NCAM independent total mortality (Z_juv) =====\n")
+print(juv_M2_vs_NCAM[, .(Period, Version, NCAM_Z_juv = Z_juv, EwE_M2 = M2, M2_over_NCAM_Zjuv)])
+cat("(M2_over_NCAM_Zjuv > 1 means EwE's predation-only mortality demand",
+    "exceeds NCAM's ENTIRE independently estimated juvenile mortality,",
+    "from every cause combined -- an external check, not an internal one.)\n")
+cat("====================================================================================================\n")
+
+fwrite(
+  ewe_cod_stanza_params,
+  file.path(output_dir, "EwE_CodStanza_MassBalanceCheck_OriginalVsAdjusted.csv")
+)
+fwrite(
+  juv_M2_vs_NCAM[, .(Period, Version, NCAM_Z_juv = Z_juv, EwE_M2 = M2, M2_over_NCAM_Zjuv)],
+  file.path(output_dir, "EwE_CodJuvenile_M2_vs_NCAM_Zjuv.csv")
+)
 
 #=========================================================
 # Compare EwE (1985-1988, 2013-2015, 2018-2020) vs NCAM F / M / Z
@@ -5445,13 +6057,14 @@ ncam_traj <- melt(
   value.name = "Value"
 )
 
-## NCAM biomass restricted to ages 4+ (same age range already used for
-## the F/M/Z 4+ weighting above: `ages <- as.character(4:14)`, `B <-
-## B_at_age[yrs, ]`), summed across those ages per year, then converted
-## to t/km^2 using the confirmed domain area (495,000 km^2) so it's on
-## the same footing as EwE's Biomass (t/km^2). This replaces using
-## `fit$rep$biomass` (which is total biomass across ALL ages, not just
-## 4+, and so isn't the right comparator for a 4+ EwE age structure).
+## NCAM biomass restricted to the adult partition (ages 3+, i.e. 36
+## months+ -- same age range already used for the F/M/Z weighting
+## above: `ages <- as.character(3:14)`, `B <- B_at_age[yrs, ]`), summed
+## across those ages per year, then converted to t/km^2 using the
+## confirmed domain area (495,000 km^2) so it's on the same footing as
+## EwE's Biomass (t/km^2). This replaces using `fit$rep$biomass` (which
+## is total biomass across ALL ages, not just the adult partition, and
+## so isn't the right comparator for the EwE adult stanza).
 
 area_km2 <- 495000
 
@@ -5729,7 +6342,7 @@ cat(
 
 ggsave(
   file.path(
-    root_dir,
+    output_dir,
     "D4_Fig1_NCAM_vs_EwE_CodAdult.png"
   ),
   p5,
@@ -5749,12 +6362,12 @@ ggsave(
 
 fwrite(
   ewe_points,
-  file.path(root_dir, "D4_Fig1_EwE_Estimates.csv")
+  file.path(output_dir, "D4_Fig1_EwE_Estimates.csv")
 )
 
 fwrite(
   ncam_traj,
-  file.path(root_dir, "D4_Fig1_NCAM_Estimates.csv")
+  file.path(output_dir, "D4_Fig1_NCAM_Estimates.csv")
 )
 
 # #=========================================================
@@ -5800,7 +6413,7 @@ fwrite(
 # 
 # ggsave(
 #   file.path(
-#     root_dir,
+#     output_dir,
 #     "D4_Fig2_FishingVsSealPredation_CodAdult.png"
 #   ),
 #   p6,
@@ -5848,7 +6461,7 @@ fwrite(
 # cat("\n", p7_caption, "\n", sep = "")
 # 
 # ggsave(
-#   file.path(root_dir, "D4_Fig3_BaselineBiomass_ByPeriod.png"),
+#   file.path(output_dir, "D4_Fig3_BaselineBiomass_ByPeriod.png"),
 #   p7,
 #   width = 8,
 #   height = 5,
@@ -5938,7 +6551,7 @@ fwrite(
 #   cat("\n", p8_caption, "\n", sep = "")
 #   
 #   ggsave(
-#     file.path(root_dir, "D1_Fig5_QYTimeSeriesExploited.png"),
+#     file.path(output_dir, "D1_Fig5_QYTimeSeriesExploited.png"),
 #     p8,
 #     width = 15,
 #     height = fig5_height,
@@ -6096,7 +6709,7 @@ fwrite(
 #       cat("\n", p9_caption, "\n", sep = "")
 #       
 #       ggsave(
-#         file.path(root_dir, "D4_Fig4_M2F_vs_QY_Agreement.png"),
+#         file.path(output_dir, "D4_Fig4_M2F_vs_QY_Agreement.png"),
 #         p9,
 #         width = 9,
 #         height = 8,
@@ -6584,7 +7197,7 @@ cat("\n", pfig1_caption, "\n", sep = "")
 
 ggsave(
   file.path(
-    root_dir,
+    output_dir,
     "D1_Fig1_M2F_QY_baseline.png"
   ),
   pfig1,
@@ -6603,12 +7216,12 @@ ggsave(
 
 fwrite(
   m2fqy_long,
-  file.path(root_dir, "D1_Fig1_Estimates_PerModel.csv")
+  file.path(output_dir, "D1_Fig1_Estimates_PerModel.csv")
 )
 
 fwrite(
   m2fqy_mean,
-  file.path(root_dir, "D1_Fig1_Estimates_PeriodMeans.csv")
+  file.path(output_dir, "D1_Fig1_Estimates_PeriodMeans.csv")
 )
 
 #=========================================================
@@ -7026,7 +7639,7 @@ if(nrow(z_prop_long) == 0){
   
   ggsave(
     file.path(
-      root_dir,
+      output_dir,
       "D4_Fig5_MortalityComponents_Proportion.png"
     ),
     p10,
@@ -7041,7 +7654,7 @@ if(nrow(z_prop_long) == 0){
   
   fwrite(
     z_prop_long,
-    file.path(root_dir, "D4_Fig5_Estimates.csv")
+    file.path(output_dir, "D4_Fig5_Estimates.csv")
   )
   
 }
@@ -7875,7 +8488,7 @@ if(nrow(inconsistency_data) == 0){
   #-------------------------------------------------------
   ggsave(
     file.path(
-      root_dir,
+      output_dir,
       "D2_Fig2_InternalInconsistency_HarpSealDietFraction.png"
     ),
     p_d2fig2,
@@ -7896,7 +8509,7 @@ if(nrow(inconsistency_data) == 0){
   
   fwrite(
     inconsistency_data,
-    file.path(root_dir, "D2_Fig2_Estimates.csv")
+    file.path(output_dir, "D2_Fig2_Estimates.csv")
   )
   
 }
@@ -7954,7 +8567,8 @@ if(exists("ratio_compare") && nrow(ratio_compare) > 0){
     "qb+15",
     "qb+30",
     "diet-20",
-    "diet-20pisciv"
+    "diet-20pisciv",
+    "qb-30_diet_cod"
   )
   
   #=========================================================
@@ -8122,7 +8736,10 @@ if(exists("ratio_compare") && nrow(ratio_compare) > 0){
     
     # Diet sensitivity
     "diet-20" = "#FDD49E",
-    "diet-20pisciv" = "#E66101"
+    "diet-20pisciv" = "#E66101",
+    
+    # Combined Q/B-30% + cod diet exploratory run
+    "qb-30_diet_cod" = "#bf812d"
   )
   
   # Reorder colours to exactly match simulation order
@@ -8347,9 +8964,15 @@ if(exists("ratio_compare") && nrow(ratio_compare) > 0){
   
   guides(
     
+    # NOTE: nrow was 1 (all Models in a single row) until
+    # "qb-30_diet_cod" became the 8th Model entry -- at that point a
+    # single row no longer fit within the panel width and the legend
+    # was clipped on the right edge of the saved PNG. Wrapping to 2
+    # rows (nrow = 2) plus the smaller key/text sizing in theme()
+    # below keeps the full legend inside the plot area.
     colour = guide_legend(
       order = 1,
-      nrow = 1,
+      nrow = 2,
       byrow = TRUE,
       override.aes = list(
         shape = 21,
@@ -8434,11 +9057,20 @@ if(exists("ratio_compare") && nrow(ratio_compare) > 0){
       
       legend.title = element_text(
         face = "plain",
-        size = 13
+        size = 11
       ),
       
+      # Smaller legend text/keys -- the colour legend now carries 8
+      # Model entries (added "qb-30_diet_cod"); shrinking these keeps
+      # 2 rows of 4 comfortably inside the panel width instead of
+      # overflowing past the right edge.
       legend.text = element_text(
-        size = 11
+        size = 9
+      ),
+      
+      legend.key.size = unit(
+        0.45,
+        "cm"
       ),
       
       legend.box = "vertical",
@@ -8460,7 +9092,7 @@ if(exists("ratio_compare") && nrow(ratio_compare) > 0){
       ),
       
       legend.key.width = unit(
-        1.1,
+        0.8,
         "cm"
       )
     )+
@@ -8517,7 +9149,7 @@ if(exists("ratio_compare") && nrow(ratio_compare) > 0){
   
   ggsave(
     file.path(
-      root_dir,
+      output_dir,
       "D3_Fig1_QBSensitivityTrend_CodAdult.png"
     ),
     p_d3fig1,
@@ -8536,12 +9168,12 @@ if(exists("ratio_compare") && nrow(ratio_compare) > 0){
   
   fwrite(
     qb_period_data$mean_line,
-    file.path(root_dir, "D3_Fig1_Estimates_PeriodMeans.csv")
+    file.path(output_dir, "D3_Fig1_Estimates_PeriodMeans.csv")
   )
   
   fwrite(
     qb_trend_long,
-    file.path(root_dir, "D3_Fig1_Estimates_Raw.csv")
+    file.path(output_dir, "D3_Fig1_Estimates_Raw.csv")
   )
   
   #=========================================================
@@ -8663,9 +9295,12 @@ if(exists("ratio_compare") && nrow(ratio_compare) > 0){
     
     guides(
       
+      # See the matching note in D3 Fig 1 above: nrow = 2 (was 1)
+      # keeps all 8 Model entries (now including "qb-30_diet_cod")
+      # from overflowing past the right edge of the saved PNG.
       colour = guide_legend(
         order = 1,
-        nrow = 1,
+        nrow = 2,
         byrow = TRUE,
         override.aes = list(
           shape = 21,
@@ -8726,11 +9361,16 @@ if(exists("ratio_compare") && nrow(ratio_compare) > 0){
       
       legend.title = element_text(
         face = "plain",
-        size = 13
+        size = 11
       ),
       
       legend.text = element_text(
-        size = 11
+        size = 9
+      ),
+      
+      legend.key.size = unit(
+        0.45,
+        "cm"
       ),
       
       legend.box = "vertical",
@@ -8752,7 +9392,7 @@ if(exists("ratio_compare") && nrow(ratio_compare) > 0){
       ),
       
       legend.key.width = unit(
-        1.1,
+        0.8,
         "cm"
       )
     )+
@@ -8787,7 +9427,7 @@ if(exists("ratio_compare") && nrow(ratio_compare) > 0){
   
   ggsave(
     file.path(
-      root_dir,
+      output_dir,
       "D3_Fig1_QBSensitivityTrend_CodAdult_RatioScale.png"
     ),
     p_d3fig1_ratio,
@@ -8856,7 +9496,8 @@ simulation_order <- c(
   "qb+15",
   "qb+30",
   "diet-20",
-  "diet-20pisciv"
+  "diet-20pisciv",
+  "qb-30_diet_cod"
 )
 
 
@@ -9133,7 +9774,13 @@ model_cols <- c(
   #-------------------------------------------------------
   
   "diet-20" = "#FDD49E",
-  "diet-20pisciv" = "#E66101"
+  "diet-20pisciv" = "#E66101",
+  
+  #-------------------------------------------------------
+  # Combined Q/B-30% + cod diet exploratory run
+  #-------------------------------------------------------
+  
+  "qb-30_diet_cod" = "#bf812d"
 )
 
 
@@ -9715,7 +10362,7 @@ fig_height <- 12
 
 ggsave(
   file.path(
-    root_dir,
+    output_dir,
     "D3_Fig2_M2F_MultipleGroups.png"
   ),
   p_m2f,
@@ -9730,7 +10377,7 @@ ggsave(
 
 fwrite(
   m2f_data,
-  file.path(root_dir, "D3_Fig2_Estimates.csv")
+  file.path(output_dir, "D3_Fig2_Estimates.csv")
 )
 
 
@@ -9740,7 +10387,7 @@ fwrite(
 
 ggsave(
   file.path(
-    root_dir,
+    output_dir,
     "D3_Fig3_QY_MultipleGroups.png"
   ),
   p_qy,
@@ -9755,7 +10402,7 @@ ggsave(
 
 fwrite(
   qy_data,
-  file.path(root_dir, "D3_Fig3_Estimates.csv")
+  file.path(output_dir, "D3_Fig3_Estimates.csv")
 )
 
 
@@ -10013,7 +10660,7 @@ cat(
 
 ggsave(
   file.path(
-    root_dir,
+    output_dir,
     "D3_Fig2_M2F_MultipleGroups_RatioScale.png"
   ),
   p_m2f_ratio,
@@ -10182,7 +10829,7 @@ cat(
 
 ggsave(
   file.path(
-    root_dir,
+    output_dir,
     "D3_Fig3_QY_MultipleGroups_RatioScale.png"
   ),
   p_qy_ratio,
@@ -10300,7 +10947,7 @@ ggsave(
 #     cat("\n", p13b_caption, "\n", sep = "")
 #     
 #     ggsave(
-#       file.path(root_dir, "D3_Fig4_BiomassSensitivityTrend_CodAdult.png"),
+#       file.path(output_dir, "D3_Fig4_BiomassSensitivityTrend_CodAdult.png"),
 #       p13b,
 #       width = 10,
 #       height = 6,
@@ -10414,7 +11061,7 @@ ggsave(
 #   cat("\n", p13_caption, "\n", sep = "")
 #   
 #   ggsave(
-#     file.path(root_dir, "D1_Fig6_SpeciesLevel_SealPrey_vs_Exploited.png"),
+#     file.path(output_dir, "D1_Fig6_SpeciesLevel_SealPrey_vs_Exploited.png"),
 #     p13,
 #     width = 9,
 #     height = 6,
