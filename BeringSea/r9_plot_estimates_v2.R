@@ -10,9 +10,15 @@
 # SETTINGS ######################
 
 #clear all objects
-rm(list = ls(all.names = TRUE)) 
+rm(list = ls(all.names = TRUE))
 #free up memrory and report the memory usage
-gc() 
+gc()
+
+#make sure output folders this script writes to actually exist (e.g. write.csv()
+#to 'tables/' errors with "No such file or directory" if the folder is missing)
+dir.create('tables', showWarnings = FALSE, recursive = TRUE)
+dir.create('figures', showWarnings = FALSE, recursive = TRUE)
+dir.create('output/survey performance', showWarnings = FALSE, recursive = TRUE)
 
 #libraries from cran to call or install/load
 pack_cran<-c('raster','units','ggplot2','data.table','sf','reshape2','data.table','sp','sf')
@@ -130,12 +136,15 @@ samp_df<-rbind(samp_df,c('existing','systematic',520,15,'scnbase'),
 
 # SBT scenarios ######################
 
-#load SBT scenarios table
-load('tables/SBT_projection.RData')#df_sbt
+#load SBT scenarios table -- not used downstream (df_sbt is never referenced again
+#in this script; SBT labels are built inline elsewhere as paste0('SBT', sbt)).
+#Kept here as notation only so the file path/intent stays documented; not executed,
+#so a missing 'tables/SBT_projection.RData' no longer stops the script.
+#load('tables/SBT_projection.RData')#df_sbt
 
 #name SBT scenarios
-df_sbt$sbt<-paste0('SBT',df_sbt$sbt_n)
-df_sbt$sbt2<-paste0(df_sbt$sbt,'_',df_sbt$Scenario)
+#df_sbt$sbt<-paste0('SBT',df_sbt$sbt_n)
+#df_sbt$sbt2<-paste0(df_sbt$sbt,'_',df_sbt$Scenario)
 
 #number of historical simulations and projected simulations
 n_sim<- 100
@@ -321,6 +330,9 @@ ex2$common <- gsub('_EBSNBS', '', ex2$common)
 # HISTORICAL INDEX ######################
 
 #dataframe to store estimated indices
+.out_hist_index <- 'output/survey performance/estimated_index_hist.RData'
+if (!file.exists(.out_hist_index)) {
+
 ind2<-data.frame(matrix(NA,nrow = 0,ncol = 7))
 names(ind2)<-c('spp','year','approach','sur','scn','index','sim')
 
@@ -362,7 +374,12 @@ for (sim in 1:100) {
 }
 
 #save simulated index
-save(ind2,file = 'output/survey performance/estimated_index_hist.RData') #ind2
+save(ind2,file = .out_hist_index) #ind2
+
+} else {
+  cat('##### cached, skipping historical index loop:', .out_hist_index, '\n')
+  load(.out_hist_index) #ind2
+}
 #load('output/estimated_index_hist.RData')
 
 #aggregate df to get mean, q95 and q5 for each group (sp, year, sampling scenario and approach)
@@ -380,8 +397,11 @@ df$scn<-factor(df$scn,
 df<-merge(df,df_spp1,by='spp')
 df$year<-as.integer(df$year)
 
+.out_true_ind_hist <- 'output/survey performance/true_ind_hist.RData'
+if (!file.exists(.out_true_ind_hist)) {
+
 #load true index and density of histoorical
-load(file = paste0("output/survey performance/dens_index_hist_OM.RData"))  #dens_index_hist_OM, 
+load(file = paste0("output/survey performance/dens_index_hist_OM.RData"))  #dens_index_hist_OM,
 names(dens_index_hist_OM)
 
 #loop over crab stocks to store true density and index (spatially clipping)
@@ -431,8 +451,7 @@ for (sp in c(spp,crabs)) {
   }
 }
 
-
-#arrange true index data
+#arrange true index data (fresh computation: add year, drop 2020, reshape to long format)
 true_ind$year<-as.character(yrs)
 true_ind<-subset(true_ind,year!='2020')
 true_ind1<-reshape2::melt(true_ind,id.vars='year')
@@ -443,9 +462,21 @@ true_ind1<-merge(true_ind1,df_spp1,by='spp')
 true_ind1$year<-as.integer(true_ind1$year)
 true_ind1$dummy<-'true index'
 
-#save true ind
-#save(true_ind,file = paste0("output/survey performance/true_ind_hist.RData"))  
-load(file = paste0("output/survey performance/true_ind_hist.RData"))  #true_ind
+} else {
+  cat('##### cached, skipping crab true-density/true-index loop:', .out_true_ind_hist, '\n')
+  load(.out_true_ind_hist) #true_ind
+
+  #true_ind loaded from cache is already in finished form (year added as character,
+  #2020 already excluded) -- just reshape it to long format to build true_ind1
+  true_ind1<-reshape2::melt(true_ind,id.vars='year')
+  names(true_ind1)<-c('year','spp','value')
+  true_ind1<-true_ind1[which(true_ind1$spp %in% df_spp1$spp),]
+  true_ind1<-merge(true_ind1,df_spp1,by='spp')
+  true_ind1$year<-as.integer(true_ind1$year)
+  true_ind1$dummy<-'true index'
+}
+
+#true_ind and true_ind1 are now populated, either freshly computed or loaded from cache
 
 #fxn to turn axis into scientific
 scientific_10 <- function(x) {
@@ -621,6 +652,9 @@ dev.off()
 ### STRS_mean<-sum(index_strata, by=year) ### index_strata<-mean_strata*area ### mean_strata<-mean(CPUE)
 
 #dataframe to store estimated indices
+.out_hist_cvsim <- 'output/survey performance/estimated_cvsim_hist.RData'
+if (!file.exists(.out_hist_cvsim)) {
+
 cv2<-data.frame(matrix(NA,nrow = 0,ncol = 7))
 names(cv2)<-c('spp','year','approach','sur','scn','cv','sim')
 
@@ -666,11 +700,14 @@ for (sim in 1:100) {
 setDT(cv2)
 cv2[spp==sp & scn==iscn & approach==apr & sim==1 & sur==su]
 
-#save cv sim data  
-save(cv2,file = 'output/survey performance/estimated_cvsim_hist.RData')
+#save cv sim data
+save(cv2,file = .out_hist_cvsim)
 
-# load simulated CV data
-load(file = 'output/survey performance/estimated_cvsim_hist.RData')  # cv2
+} else {
+  cat('##### cached, skipping historical CV loop:', .out_hist_cvsim, '\n')
+  load(.out_hist_cvsim) # cv2
+}
+
 setDT(cv2)  # confirm/restore data.table class after loading
 
 #define year as numeric
@@ -847,6 +884,10 @@ spearman_df <- all_df[, .(mean_cvsim  = mean(cvsim, na.rm = FALSE),
                           mean_cvtrue = mean(cvtrue, na.rm = FALSE)),
                       by = .(spp, scn, approach, sim, year)]
 
+.spearman_spp <- unique(all_df$spp)[10:20]
+.spearman_files <- paste0('output/survey performance/full_spearman_', .spearman_spp, '.RData')
+if (!all(file.exists(.spearman_files))) {
+
 for (sp in unique(all_df$spp)[10:20]) {
   corr_df <- data.frame()
   for (iscn in unique(all_df$scn)[1:4]) {
@@ -885,6 +926,10 @@ for (sp in unique(all_df$spp)[10:20]) {
     }
   }
   save(corr_df, file = paste0('output/survey performance/full_spearman_', sp, '.RData'))
+}
+
+} else {
+  cat('##### cached, skipping Spearman correlation loop -- all full_spearman_*.RData files present\n')
 }
 
 files_list <- list.files('output/survey performance/', pattern = 'full_spearman', full.names = TRUE)
@@ -1355,11 +1400,14 @@ dev.off()
 
   #combine true indeces
   
+  .out_true_ind_proj <- 'output/survey performance/true_ind_proj.RData'
+  if (!file.exists(.out_true_ind_proj)) {
+
   #files true indices
   files<-list.files('output/species/',pattern = ' ms_sim_proj_ind',full.names = TRUE)
   #files true densities from projected
   densfiles<-list.files('output/species/',pattern = 'ms_sim_proj_dens',full.names = TRUE)
-  
+
   #df to store values
   proj_ind2<-data.frame(matrix(NA,nrow = 0,ncol = 5))
   names(proj_ind2)<-c('sp','year','sim','index','sbt')
@@ -1429,9 +1477,13 @@ dev.off()
   }
   
   #save true indices with crab stocks
-  save(proj_ind2,file = 'output/survey performance/true_ind_proj.RData') 
-  load('output/survey performance/true_ind_proj.RData') #proj_ind2
-  
+  save(proj_ind2,file = .out_true_ind_proj)
+
+  } else {
+    cat('##### cached, skipping projected true-index loop:', .out_true_ind_proj, '\n')
+    load(.out_true_ind_proj) #proj_ind2
+  }
+
   #rename
   colnames(proj_ind2)[4]<-'true_ind'
   
@@ -1439,10 +1491,13 @@ dev.off()
   #combining indices
 
   
+  .out_est_index_proj <- 'output/survey performance/estimated_index_proj.RData'
+  if (!file.exists(.out_est_index_proj)) {
+
   #df to store results
   ind2<-data.frame(matrix(NA,nrow = 0,ncol = 8))
   names(ind2)<-c('spp','year','approach','sur','scn','index','sbt','sim')
-  
+
   #loop over sbt and simulated data
   for (sbt in 1:8) {
         
@@ -1480,15 +1535,19 @@ dev.off()
      }
   }
   
-  save(ind2,file = 'output/survey performance/estimated_index_proj.RData')
-  load('output/survey performance/estimated_index_proj.RData')
+  save(ind2,file = .out_est_index_proj)
+
+  } else {
+    cat('##### cached, skipping projected estimated-index loop:', .out_est_index_proj, '\n')
+    load(.out_est_index_proj)
+  }
 
   #rename
   head(ind2)
   names(ind2)[6]<-'est_ind'
   
   #get mean and 95CI of est index
-  df<-aggregate(est_ind ~ spp + year + scn + approach , #+ sim
+  df<-aggregate(est_ind ~ spp + year + scn + approach + sbt , #+ sim
                 ind2,
                 FUN = function(x) c(mean = mean(x), q95 = quantile(x,probs=0.95) , q5 = quantile(x,probs=0.05)) )
   colnames(df$est_ind)<-c('mean','q95','q5')
@@ -1635,12 +1694,15 @@ dev.off()
   ### STRS_var<-sum(strs_var, by=year) ### strs_var<-var*area²/samples ### var<-var(CPUE)
   ### STRS_mean<-sum(index_strata, by=year) ### index_strata<-mean_strata*area ### mean_strata<-mean(CPUE)
   
+  .out_cvsim_proj <- 'output/survey performance/cvsim_proj.RData'
+  if (!file.exists(.out_cvsim_proj)) {
+
   #combining CVs
   ind2<-data.frame(matrix(NA,nrow = 0,ncol = 8))
   names(ind2)<-c('spp','year','approach','sur','scn','cv','sbt','sim')
 
 for (sbt in 1:8) {
-  
+
   files<-list.files('output/ms simulated surveys future/',pattern = paste0('SBT',sbt),recursive = TRUE,full.names = TRUE)
   
   for (sim in 1:100) {
@@ -1672,9 +1734,13 @@ for (sbt in 1:8) {
 }
 
 cvsim<-ind2
-save(cvsim,file = 'output/survey performance/cvsim_proj.RData')
-load('output/survey performance/cvsim_proj.RData') #cvsim
-load('output/survey performance/cvsim_proj.RData') #cvsim
+save(cvsim,file = .out_cvsim_proj)
+
+} else {
+  cat('##### cached, skipping projected CV loop:', .out_cvsim_proj, '\n')
+  load(.out_cvsim_proj) #cvsim
+}
+
 setDT(cvsim)
 names(cvsim)[6] <- 'cvsim'
 
@@ -1843,6 +1909,9 @@ setDT(ind2)
 setDT(proj_ind2)
 setDT(df_spp1)
 
+.out_rrmse_proj <- 'output/survey performance/rrmse_cv_proj.RData'
+if (!file.exists(.out_rrmse_proj)) {
+
 rrmse_list <- vector("list", 8)
 
 for (sbtscn in 1:8) {
@@ -1906,9 +1975,12 @@ for (sbtscn in 1:8) {
 }
 
 rrmse <- rbindlist(rrmse_list, fill = TRUE)
-save(rrmse, file = 'output/survey performance/rrmse_cv_proj.RData')
+save(rrmse, file = .out_rrmse_proj)
 
-load(file = 'output/survey performance/rrmse_cv_proj.RData') #rrmse
+} else {
+  cat('##### cached, skipping projected RRMSE loop:', .out_rrmse_proj, '\n')
+  load(.out_rrmse_proj) #rrmse
+}
 
 df2 <- rrmse
 df3 <- df2[which(df2$spp %in% df_spp1$spp), ]
