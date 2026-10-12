@@ -1,6 +1,14 @@
 library(data.table)
 library(ggplot2)
 
+## `options(warn = 1)` makes warnings print IMMEDIATELY, right where
+## they happen, instead of all being held back and dumped as a batch
+## only at the very end of the run -- without this, a warning several
+## thousand lines back in the log (see the log setup below, right
+## after output_dir is validated) would otherwise show up completely
+## out of context at the bottom of the file.
+options(warn = 1)
+
 #=========================================================
 # Settings
 #=========================================================
@@ -57,6 +65,35 @@ if(!dir.exists(output_dir)){
     "near the top of this script."
   )
 }
+
+#=========================================================
+# Console log -- writes a full copy of everything this script prints
+# (cat() output, printed tables, warnings) to a timestamped .txt file
+# in output_dir, so the whole run can be sent along as one file
+# instead of copy-pasting from the console. Console output still
+# appears live as normal (split = TRUE) -- this only ADDS a file
+# copy, it doesn't replace what you already see while the script runs.
+#=========================================================
+## If the script stops partway through with an error, the log file up
+## to that point is still saved and valid -- but the sink() connections
+## themselves are left open. Before re-running the script in the SAME
+## R session after an error (not needed if you start a fresh R
+## session), run this once in the console to close them cleanly
+## (harmless if nothing is open):
+##   while (sink.number(type = "message") > 0) sink(type = "message")
+##   while (sink.number() > 0) sink()
+
+log_file <- file.path(
+  output_dir,
+  paste0("run_log_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".txt")
+)
+
+log_con <- file(log_file, open = "wt")
+sink(log_con, split = TRUE)       # console output (cat/print) -> console AND file
+sink(log_con, type = "message")   # warnings/messages -> file (can't split this type)
+
+cat("Run started:", format(Sys.time()), "\n")
+cat("Log file:", log_file, "\n\n")
 
 # Pattern used to identify the harp seal group
 harp_pattern <- "(?i)(harp.*seal|seal.*harp)"
@@ -167,8 +204,7 @@ sensitivity_model_colors <- c(
   "qb+15"         = "#fd8d3c",
   "qb+30"         = "#a63603",
   "diet-20"       = "#238b45",
-  "diet-20pisciv" = "#88419d",
-  "qb-30_diet_cod" = "#bf812d"
+  "diet-20pisciv" = "#88419d"
 )
 
 ## Single authoritative list of every Model variant this script knows
@@ -202,17 +238,7 @@ model_levels_all <- c(
   "PB-50",
   "PB-25",
   "PB+25",
-  "PB+50",
-  ## Added for the exploratory Atlantic cod diet/predation sensitivity
-  ## run requested by the client: harp seal Q/B reduced 30% (same
-  ## reduction as "qb-30" above), combined with the empirically-
-  ## specified cod diet split. Run on a separate machine ("danie"),
-  ## not yet present in root_dir as of this edit -- added here first,
-  ## per this list's own stated purpose ("add any new Model variant
-  ## here once, and every figure that references model_levels_all
-  ## picks it up"), so the script won't silently NA-collapse this
-  ## Model once its output folder exists and is read in.
-  "qb-30_diet_cod"
+  "PB+50"
 )
 
 ## Maps every combined Simulation onto one of THREE display periods --
@@ -244,8 +270,7 @@ period_levels <- c("1985-1988", "2013-2015", "2018-2020")
 ## the Q/B range) -- this one is for the *colour* legend specifically.
 
 model_order_baseline_first <- c(
-  "baseline", "qb-30", "qb-15", "qb+15", "qb+30", "diet-20", "diet-20pisciv",
-  "qb-30_diet_cod"
+  "baseline", "qb-30", "qb-15", "qb+15", "qb+30", "diet-20", "diet-20pisciv"
 )
 
 ## ---- Helper: build a 3-category Period time series from a table
@@ -1777,16 +1802,6 @@ find_col <- function(dt, pattern, file_label){
 ## "2018-2020_8020" Simulation won't be computable until both rows are
 ## added below -- add them here once you have the equivalent
 ## HarpSealTEST.xlsx-style values for the N80/S20 runs.
-##
-## GAP (2nd): no entries yet for Model == "qb-30_diet_cod" either, for
-## any Simulation. QB_seal for it CAN be derived once the run exists
-## (baseline QB_seal x 0.70, same rule as "qb-30" -- see qb_multiplier
-## above), but DietFraction_CodAdult cannot be guessed; it depends on
-## exactly what cod diet value was set for this run on the other
-## machine. Add the real rows here (both QB_seal and
-## DietFraction_CodAdult, for whichever Simulations it was actually run
-## on) once that run exists -- until then, the Q/Y loop will skip this
-## Model the same graceful way it skips N80/S20 above.
 
 seal_qb_diet_lookup <- data.table(
   Simulation = rep(
@@ -1840,12 +1855,68 @@ qb_multiplier <- c(
   "qb+15"         = 1.15,
   "qb+30"         = 1.30,
   "diet-20"       = 1.00,
-  "diet-20pisciv" = 1.00,
-  ## Same Q/B reduction as "qb-30" (0.70x baseline) -- this run combines
-  ## that with a cod-specific diet change, which this multiplier doesn't
-  ## capture (it only scales QB_seal, not DietFraction_CodAdult/Juv).
-  "qb-30_diet_cod" = 0.70
+  "diet-20pisciv" = 1.00
 )
+
+#=========================================================
+# Client-requested alternative scenario: harp seal diet vector
+#=========================================================
+## Hardcoded directly from the diet table the client provided
+## (2026-10-11), covering BOTH the North and South sub-models -- the
+## two region-specific tables the client sent turned out to specify
+## the IDENTICAL harp seal diet vector for North and South (every
+## nonzero proportion matches between the two, and both sum to
+## exactly 1.000), so a single vector below is used for every
+## "alternative" Model folder regardless of region. This exists
+## because the "alternative" output folders only contain Mortalities
+## and Predation mortality rates files, no Diet composition/matrix
+## export (confirmed from the Diet-source summary in the 2026-10-11
+## run log) -- without this, the Q/Y loop below falls back to Tier 2
+## (that Simulation's BASELINE diet), which would silently use the
+## WRONG diet vector for this run. Only covers the harp seal's own
+## diet (what the Q/Y loop needs, i.e. what harp seals eat); Other
+## piscivorous fish's diet (what IT eats) is a separate vector the
+## client also specified, but that one only affects EwE's own
+## internal mass-balance solving -- it's already baked into the
+## Mortalities.csv/Predation mortality rates.csv this run produced,
+## and isn't an input this R script needs separately.
+##
+## Every FG not listed here gets 0 (matches the client's table, where
+## every unlisted/blank cell was an explicit zero). Names are the
+## clean_group_names()'d canonical names used throughout this script,
+## not the raw EwE export spelling.
+
+alternative_seal_diet <- c(
+  "Cod adult"                    = 0.0335,
+  "Cod juvenile"                 = 0.0335,
+  "Greenland halibut"            = 0.0027,
+  "Other piscivorous fish"       = 0.0670,
+  "Redfish"                      = 0.0133,
+  "Arctic cod"                   = 0.1717,
+  "American Plaice adult"        = 0.0178,
+  "American Plaice juvenile"     = 0.0427,
+  "Large benthivorous fish"      = 0.0044,
+  "Medium benthivorous fish"     = 0.0036,
+  "Small benthivorous fish"      = 0.0178,
+  "Herring"                      = 0.1690,
+  "Sandlance"                    = 0.0890,
+  "Capelin"                      = 0.0801,
+  "Other planktivorous fish"     = 0.0004,
+  "Squid"                        = 0.0004,
+  "Shrimp"                       = 0.1000,
+  "Snow crab"                    = 0.0018,
+  "Predatory invertebrates"      = 0.0445,
+  "Suspension feeding invertebrates" = 0.0534,
+  "Macrozooplankton"             = 0.0534
+)
+
+if(abs(sum(alternative_seal_diet) - 1) > 0.001){
+  warning(
+    "alternative_seal_diet sums to ", round(sum(alternative_seal_diet), 4),
+    ", not 1 -- re-check the hardcoded values against the client's",
+    " diet table before trusting Q/Y for the alternative scenario."
+  )
+}
 
 ## Reference only -- P/B perturbation runs (PB+50/-50/+25/-25) still
 ## don't exist as EwE output folders as far as this script knows. Kept
@@ -2984,7 +3055,43 @@ qy_results <- rbindlist(
       
       tier_used <- NA_character_
       
-      if(!is.na(diet_file)){
+      if(model_name == "alternative" && exists("alternative_seal_diet")){
+        
+        #-------------------------------------------------------
+        # Tier 0:
+        # Client-requested alternative scenario -- hardcoded diet
+        # vector (see alternative_seal_diet above), since this
+        # run's own output folder has no Diet composition/matrix
+        # file to read (confirmed from the Diet-source summary).
+        # Takes priority over Tier 1/2 below even if a diet file
+        # happens to be found, since the hardcoded vector is the
+        # one actually confirmed correct for this run by the client.
+        #-------------------------------------------------------
+        
+        tier_used <- "Tier 0 (hardcoded client-provided diet vector)"
+        
+        cat(
+          "  Model '", model_name, "' in ", model,
+          " -- using the hardcoded client-provided diet vector",
+          " (alternative_seal_diet), not a file.\n",
+          sep = ""
+        )
+        
+        ## Build the same {GroupID, Group, DietFraction} shape
+        ## read_diet_file() returns, using this Simulation's OWN
+        ## baseline Group/GroupID list so every FG this folder's
+        ## Mortalities.csv knows about gets a (possibly zero)
+        ## DietFraction -- same join behavior as the other tiers.
+        
+        group_ref <- unique(
+          results_raw[Simulation == sim_name & Model == model_name, .(GroupID, Group)]
+        )
+        
+        out <- copy(group_ref)
+        out[, DietFraction := alternative_seal_diet[Group]]
+        out[is.na(DietFraction), DietFraction := 0]
+        
+      } else if(!is.na(diet_file)){
         
         #-------------------------------------------------------
         # Tier 1:
@@ -5761,88 +5868,287 @@ fwrite(
 )
 
 #=========================================================
-# EwE Atlantic cod stanza parametrization quality check:
-# mass-balance diagnostic (Other mort. / EE-for-predation) + NCAM
-# cross-check, original vs adjusted Basic Estimates table.
+# Client-requested "alternative" scenario (2018-2020 only):
+# mass-balance diagnostic (Other mort. / EE-for-predation),
+# read directly from the "alternative" output folder on disk.
 #=========================================================
-## Values below are copied by hand from the two Ecopath "Basic
-## Estimates" tables pasted into this conversation (Atlantic cod rows
-## only -- "greater than 35cm" = adult stanza, "less than 35cm" =
-## juvenile stanza). The table's second column reads "#NAME?" in the
-## pasted spreadsheet (a broken Excel formula reference); it's F
-## (fishing mortality rate, /year), confirmed because F/Z * Z
-## reproduces it exactly in every row (e.g. juvenile original:
-## 0.158 * 0.402 = 0.0635). If EITHER Basic Estimates table changes,
-## update the four blocks below to match -- these are NOT read from
-## any file, they're the pasted snapshot.
-ewe_cod_stanza_params <- data.table(
-  Version = c("Original", "Original", "Adjusted", "Adjusted"),
-  Stanza  = c("Adult (>35cm)", "Juvenile (<35cm)", "Adult (>35cm)", "Juvenile (<35cm)"),
-  Z  = c(0.402, 0.402, 0.395, 0.432),
-  F  = c(0.0318, 0.0635, 0.0318, 0.105),
-  M2 = c(0.154, 1.413, 0.154, 2.346)
-)
+## REPLACES the earlier qb-30_diet_cod comparison (removed from this
+## script entirely, per the client's revised request on 2026-10-10:
+## run this scenario ONCE, scoped to the 2018-2020 model only, instead
+## of as one of the seven cross-period SOW sensitivity runs). Unlike
+## the old qb-30_diet_cod block, nothing here is hand-pasted: the
+## folder-discovery loop above (`all_dirs`/`model_dirs`) already picks
+## up ANY folder under root_dir that contains both a Mortalit*.csv and
+## a Predation*mortality*.csv file, regardless of name or nesting
+## depth -- so a folder literally named "alternative" (wherever it
+## sits under root_dir, per your own description of where you saved
+## this run) is already read in by that same loop, with
+## Model <- basename("alternative") and
+## Simulation <- basename(dirname(.)) (the period folder it sits in).
+## `results_raw` (captured earlier, BEFORE `results$Model` gets
+## restricted to `model_levels_all`) still carries this row -- that
+## restriction is what intentionally keeps "alternative" OUT of every
+## cross-period figure/table built from `results` elsewhere in this
+## script, exactly as requested (it should not appear alongside the
+## seven SOW sensitivity runs).
 
-## Other mortality (M0) is NOT an independent input -- it's whatever is
-## left once F and M2 are subtracted from Z. A negative value here is
-## the mass-balance violation made visible: predation (M2) alone is
-## demanding more than the stanza's entire total mortality (Z) can
-## supply once fishing is accounted for.
-ewe_cod_stanza_params[, M0 := Z - F - M2]
+alt_rows <- results_raw[Model == "alternative"]
 
-## EE for predation: M2 as a fraction of the mortality budget left
-## after fishing (Z - F). Ecopath's own EE is only "valid" at <= 1
-## (100%); anything above means more is being eaten than the
-## parametrization's own total mortality says is biologically possible.
-ewe_cod_stanza_params[, EE_predation := M2 / (Z - F)]
+if (nrow(alt_rows) == 0) {
+  warning(
+    "No 'alternative' model folder was found anywhere under root_dir ",
+    "(root_dir = '", root_dir, "'). The client-requested-scenario ",
+    "section below will be skipped. Check that the folder is really ",
+    "named 'alternative' and that it contains both a Mortalit*.csv ",
+    "and a Predation*mortality*.csv file, same as every other Model ",
+    "folder this script reads, and that root_dir points at the right ",
+    "machine/location."
+  )
+} else {
+  
+  ## Guard: this run is only supposed to exist for 2018-2020. If an
+  ## "alternative" folder also turns up nested under another period,
+  ## that's unexpected -- warn loudly rather than silently including
+  ## or excluding it.
+  unexpected_periods <- unique(
+    alt_rows$Simulation[!grepl("2018-2020", alt_rows$Simulation)]
+  )
+  
+  if (length(unexpected_periods) > 0) {
+    warning(
+      "'alternative' model folder(s) found under Simulation(s) other ",
+      "than 2018-2020: ", paste(unexpected_periods, collapse = ", "),
+      ". This run was only supposed to be scoped to 2018-2020 -- ",
+      "these extra folder(s) are EXCLUDED below; delete/rename them ",
+      "if they're leftovers, or investigate if they're not."
+    )
+  }
+  
+  alt_rows <- alt_rows[grepl("2018-2020", Simulation)]
+  
+}
 
-cat("\n===== EwE Atlantic cod stanza parametrization: mass-balance check =====\n")
-print(ewe_cod_stanza_params)
-cat("(M0 < 0 or EE_predation > 1 = predation demand exceeds what Z can",
-    "supply -- a mass-balance violation, not a subjective judgment call.)\n")
-cat("==========================================================================\n")
-
-## ---- Cross-check: juvenile M2 (predation demand) vs NCAM's
-## independent total juvenile mortality (Z_juv, all causes combined) ----
-## If the model is asking juvenile cod to sustain MORE predation
-## mortality alone than NCAM's entire independent estimate of total
-## mortality (every cause combined), that's an external, independent
-## confirmation of infeasibility -- not just an internal EE flag.
-## Built via expand.grid + two single-key merges rather than a
-## by=character(0) cross-join -- more verbose, but doesn't depend on
-## exactly how data.table's merge() handles an empty `by` (couldn't be
-## verified in this sandbox, no network access to (re)install
-## data.table here to test it directly).
-juv_M2_vs_NCAM <- as.data.table(expand.grid(
-  Period  = mortality_comparison_juvadult$Period,
-  Version = ewe_cod_stanza_params[Stanza == "Juvenile (<35cm)", Version],
-  stringsAsFactors = FALSE
-))
-juv_M2_vs_NCAM <- merge(
-  juv_M2_vs_NCAM, mortality_comparison_juvadult[, .(Period, Z_juv)], by = "Period"
-)
-juv_M2_vs_NCAM <- merge(
-  juv_M2_vs_NCAM,
-  ewe_cod_stanza_params[Stanza == "Juvenile (<35cm)", .(Version, M2)],
-  by = "Version"
-)
-juv_M2_vs_NCAM[, M2_over_NCAM_Zjuv := M2 / Z_juv]
-
-cat("\n===== Juvenile cod: EwE predation demand (M2) vs NCAM independent total mortality (Z_juv) =====\n")
-print(juv_M2_vs_NCAM[, .(Period, Version, NCAM_Z_juv = Z_juv, EwE_M2 = M2, M2_over_NCAM_Zjuv)])
-cat("(M2_over_NCAM_Zjuv > 1 means EwE's predation-only mortality demand",
-    "exceeds NCAM's ENTIRE independently estimated juvenile mortality,",
-    "from every cause combined -- an external check, not an internal one.)\n")
-cat("====================================================================================================\n")
-
-fwrite(
-  ewe_cod_stanza_params,
-  file.path(output_dir, "EwE_CodStanza_MassBalanceCheck_OriginalVsAdjusted.csv")
-)
-fwrite(
-  juv_M2_vs_NCAM[, .(Period, Version, NCAM_Z_juv = Z_juv, EwE_M2 = M2, M2_over_NCAM_Zjuv)],
-  file.path(output_dir, "EwE_CodJuvenile_M2_vs_NCAM_Zjuv.csv")
-)
+if (nrow(alt_rows) > 0) {
+  
+  ## Comparison point: the already fully-processed (N/S area-weighted,
+  ## renamed) 2018-2020 baseline row for the same functional groups,
+  ## from the main `results` table -- NOT NCAM this time. The client
+  ## set Z, diet, and the Other-piscivorous-fish EE/biomass directly
+  ## as inputs to THIS run, so the relevant comparison is this run
+  ## against the model's own baseline parametrization, group by group.
+  baseline_2018_2020 <- results[
+    Model == "baseline" & Simulation == "2018-2020"
+  ]
+  
+  alt_vs_baseline <- rbindlist(list(
+    baseline_2018_2020[, .(
+      Version = "Baseline (2018-2020)", Group, Z, F = Fishing,
+      M2 = Total_M2
+    )],
+    alt_rows[, .(
+      Version = "Alternative (client-requested, 2018-2020)", Group, Z,
+      F = Fishing, M2 = Total_M2
+    )]
+  ), use.names = TRUE)
+  
+  ## Other mortality (M0) is NOT an independent input -- it's whatever
+  ## is left once F and M2 are subtracted from Z. A negative value
+  ## here is the mass-balance violation made visible: predation (M2)
+  ## alone is demanding more than the group's entire total mortality
+  ## (Z) can supply once fishing is accounted for.
+  alt_vs_baseline[, M0 := Z - F - M2]
+  
+  ## EE for predation: M2 as a fraction of the mortality budget left
+  ## after fishing (Z - F). Ecopath's own EE is only "valid" at <= 1
+  ## (100%); anything above means more is being eaten than the
+  ## parametrization's own total mortality says is biologically
+  ## possible.
+  alt_vs_baseline[, EE_predation := M2 / (Z - F)]
+  
+  cat("\n===== Client-requested alternative scenario (2018-2020 only): mass-balance check, ALL functional groups =====\n")
+  print(alt_vs_baseline)
+  cat("(M0 < 0 or EE_predation > 1 = predation demand exceeds what Z can",
+      "supply -- a mass-balance violation, not a subjective judgment call.)\n")
+  cat("==========================================================================\n")
+  
+  ## ---- Cod juvenile check against the CLIENT'S OWN stated Z
+  ## threshold (Z >= 2.5/yr) -- not NCAM. The client specified this Z
+  ## directly as a model input for this run, so the relevant question
+  ## is whether the predation demand (M2) this run itself produces
+  ## stays within the very Z the client set. ----
+  client_Z_juv <- 2.5
+  
+  alt_juv <- alt_rows[Group == "Cod juvenile"]
+  
+  if (nrow(alt_juv) > 0) {
+    
+    alt_juv_check <- alt_juv[, .(
+      Simulation, Group, Z, Fishing, Total_M2,
+      Client_stated_Zjuv = client_Z_juv,
+      M2_over_client_Zjuv = Total_M2 / client_Z_juv
+    )]
+    
+    cat("\n===== Cod juvenile (alternative run): EwE predation demand (M2) vs the client's own stated Z (>= 2.5/yr) =====\n")
+    print(alt_juv_check)
+    cat("(M2_over_client_Zjuv > 1 means the predation-only mortality",
+        "demand this run itself produces exceeds the very Z the",
+        "client specified as an input -- an internal inconsistency",
+        "within the client's own requested parametrization, not a",
+        "comparison to an external/independent source like NCAM.)\n")
+    cat("====================================================================================================\n")
+    
+    tryCatch(
+      fwrite(
+        alt_juv_check,
+        file.path(output_dir, "Alternative_CodJuvenile_M2_vs_ClientStatedZ.csv")
+      ),
+      error = function(e){
+        warning(
+          "Couldn't write Alternative_CodJuvenile_M2_vs_ClientStatedZ.csv: ",
+          conditionMessage(e),
+          " -- likely the file is open in Excel or another program.",
+          " Close it and re-run if you need this file; the rest of the",
+          " script will continue regardless (this used to be a fatal",
+          " error that stopped everything after this point)."
+        )
+      }
+    )
+    
+  } else {
+    warning(
+      "No 'Cod juvenile' row found in the alternative run's ",
+      "Mortalities.csv -- skipping the client-stated-Z cross-check."
+    )
+  }
+  
+  tryCatch(
+    fwrite(
+      alt_vs_baseline,
+      file.path(output_dir, "Alternative_Run_2018_2020_MassBalanceCheck_AllGroups.csv")
+    ),
+    error = function(e){
+      warning(
+        "Couldn't write Alternative_Run_2018_2020_MassBalanceCheck_AllGroups.csv: ",
+        conditionMessage(e),
+        " -- likely the file is open in Excel or another program.",
+        " Close it and re-run if you need this file; the rest of the",
+        " script will continue regardless."
+      )
+    }
+  )
+  
+  #=========================================================
+  # Client-requested alternative scenario: M2/F and Q/Y ratios,
+  # same metrics as Table 3, combined via the same area-weighted
+  # N/S method as the rest of the pipeline.
+  #=========================================================
+  ## `results_raw` and `qy_results_raw` (both captured earlier, before
+  ## Model gets restricted to model_levels_all) still carry the raw
+  ## per-sub-model ("alternative" x 2018-2020_N50/N80/S50/S20) rows
+  ## needed here. `combine_NS_simulations()` is the SAME function the
+  ## rest of this script uses to produce the "2018-2020_5050" and
+  ## "2018-2020_8020" combined estimates for every other Model -- reused
+  ## directly here rather than re-implementing the area weighting, so
+  ## this stays consistent with Table 3 and every other combined figure
+  ## if the area weights ever change.
+  ##
+  ## IMPORTANT: Q/Y for this run is only meaningful if the "alternative"
+  ## folder has its OWN Diet composition/matrix CSV export (Tier 1 in
+  ## the Q/Y loop above) -- otherwise the Q/Y loop silently reuses that
+  ## Simulation's BASELINE diet (Tier 2), which would NOT reflect the
+  ## client's revised diet vectors. Check the "Diet-source summary"
+  ## console output above (tier_used for Model == "alternative") before
+  ## trusting the Q/Y numbers below.
+  
+  if(exists("qy_results_raw")){
+    
+    alt_m2f_raw <- results_raw[
+      Model == "alternative" & grepl("2018-2020", Simulation),
+      .(Simulation, Group, Predator_M2, Fishing)
+    ]
+    
+    alt_qy_raw <- qy_results_raw[
+      Model == "alternative" & grepl("2018-2020", Simulation),
+      .(Simulation, Group, Q_species, Y_species)
+    ]
+    
+    if(nrow(alt_m2f_raw) == 0 || nrow(alt_qy_raw) == 0){
+      
+      warning(
+        "Can't build M2/F and Q/Y ratios for the alternative scenario: ",
+        if(nrow(alt_m2f_raw) == 0) "no results_raw rows " else "",
+        if(nrow(alt_qy_raw) == 0) "no qy_results_raw rows " else "",
+        "found for Model == 'alternative' under a 2018-2020 Simulation."
+      )
+      
+    } else {
+      
+      alt_m2f_combined <- combine_NS_simulations(
+        alt_m2f_raw,
+        id_cols    = c("Group"),
+        value_cols = c("Predator_M2", "Fishing")
+      )
+      alt_m2f_combined[, M2_over_F := fifelse(
+        Fishing > 0, Predator_M2 / Fishing, NA_real_
+      )]
+      
+      alt_qy_combined <- combine_NS_simulations(
+        alt_qy_raw,
+        id_cols    = c("Group"),
+        value_cols = c("Q_species", "Y_species")
+      )
+      alt_qy_combined[, Q_over_Y := fifelse(
+        Y_species > 0, Q_species / Y_species, NA_real_
+      )]
+      
+      alt_ratio_compare <- merge(
+        alt_m2f_combined[, .(Simulation, Group, M2_over_F)],
+        alt_qy_combined[, .(Simulation, Group, Q_over_Y)],
+        by = c("Simulation", "Group"),
+        all = TRUE
+      )
+      
+      setorder(alt_ratio_compare, Simulation, Group)
+      
+      cat("\n===== Client-requested alternative scenario (2018-2020 only): M2/F and Q/Y ratios, same metrics as Table 3 =====\n")
+      print(alt_ratio_compare[Group %in% c("Cod adult", "Cod juvenile")])
+      cat("(Q/Y uses the hardcoded client-provided harp seal diet vector",
+          "(alternative_seal_diet) -- check the Diet-source summary",
+          "printed earlier in this run shows 'Tier 0 (hardcoded",
+          "client-provided diet vector)' for Model == 'alternative';",
+          "if it instead shows Tier 1/2, that means alternative_seal_diet",
+          "wasn't found/used and these numbers are not trustworthy.)\n")
+      cat("==========================================================================\n")
+      
+      tryCatch(
+        fwrite(
+          alt_ratio_compare,
+          file.path(output_dir, "Alternative_Run_2018_2020_M2F_QY_Ratios.csv")
+        ),
+        error = function(e){
+          warning(
+            "Couldn't write Alternative_Run_2018_2020_M2F_QY_Ratios.csv: ",
+            conditionMessage(e),
+            " -- likely the file is open in Excel or another program.",
+            " Close it and re-run if you need this file."
+          )
+        }
+      )
+      
+    }
+    
+  } else {
+    
+    warning(
+      "qy_results_raw not found -- can't compute M2/F and Q/Y ratios",
+      " for the alternative scenario. This should exist by this point",
+      " in the script; check that the Q/Y section above ran without",
+      " stopping early."
+    )
+    
+  }
+  
+}
 
 #=========================================================
 # Compare EwE (1985-1988, 2013-2015, 2018-2020) vs NCAM F / M / Z
@@ -8567,8 +8873,7 @@ if(exists("ratio_compare") && nrow(ratio_compare) > 0){
     "qb+15",
     "qb+30",
     "diet-20",
-    "diet-20pisciv",
-    "qb-30_diet_cod"
+    "diet-20pisciv"
   )
   
   #=========================================================
@@ -8736,10 +9041,7 @@ if(exists("ratio_compare") && nrow(ratio_compare) > 0){
     
     # Diet sensitivity
     "diet-20" = "#FDD49E",
-    "diet-20pisciv" = "#E66101",
-    
-    # Combined Q/B-30% + cod diet exploratory run
-    "qb-30_diet_cod" = "#bf812d"
+    "diet-20pisciv" = "#E66101"
   )
   
   # Reorder colours to exactly match simulation order
@@ -8964,15 +9266,9 @@ if(exists("ratio_compare") && nrow(ratio_compare) > 0){
   
   guides(
     
-    # NOTE: nrow was 1 (all Models in a single row) until
-    # "qb-30_diet_cod" became the 8th Model entry -- at that point a
-    # single row no longer fit within the panel width and the legend
-    # was clipped on the right edge of the saved PNG. Wrapping to 2
-    # rows (nrow = 2) plus the smaller key/text sizing in theme()
-    # below keeps the full legend inside the plot area.
     colour = guide_legend(
       order = 1,
-      nrow = 2,
+      nrow = 1,
       byrow = TRUE,
       override.aes = list(
         shape = 21,
@@ -9060,17 +9356,8 @@ if(exists("ratio_compare") && nrow(ratio_compare) > 0){
         size = 11
       ),
       
-      # Smaller legend text/keys -- the colour legend now carries 8
-      # Model entries (added "qb-30_diet_cod"); shrinking these keeps
-      # 2 rows of 4 comfortably inside the panel width instead of
-      # overflowing past the right edge.
       legend.text = element_text(
-        size = 9
-      ),
-      
-      legend.key.size = unit(
-        0.45,
-        "cm"
+        size = 11
       ),
       
       legend.box = "vertical",
@@ -9092,7 +9379,7 @@ if(exists("ratio_compare") && nrow(ratio_compare) > 0){
       ),
       
       legend.key.width = unit(
-        0.8,
+        1.1,
         "cm"
       )
     )+
@@ -9295,12 +9582,9 @@ if(exists("ratio_compare") && nrow(ratio_compare) > 0){
     
     guides(
       
-      # See the matching note in D3 Fig 1 above: nrow = 2 (was 1)
-      # keeps all 8 Model entries (now including "qb-30_diet_cod")
-      # from overflowing past the right edge of the saved PNG.
       colour = guide_legend(
         order = 1,
-        nrow = 2,
+        nrow = 1,
         byrow = TRUE,
         override.aes = list(
           shape = 21,
@@ -9365,12 +9649,7 @@ if(exists("ratio_compare") && nrow(ratio_compare) > 0){
       ),
       
       legend.text = element_text(
-        size = 9
-      ),
-      
-      legend.key.size = unit(
-        0.45,
-        "cm"
+        size = 11
       ),
       
       legend.box = "vertical",
@@ -9392,7 +9671,7 @@ if(exists("ratio_compare") && nrow(ratio_compare) > 0){
       ),
       
       legend.key.width = unit(
-        0.8,
+        1.1,
         "cm"
       )
     )+
@@ -9496,8 +9775,7 @@ simulation_order <- c(
   "qb+15",
   "qb+30",
   "diet-20",
-  "diet-20pisciv",
-  "qb-30_diet_cod"
+  "diet-20pisciv"
 )
 
 
@@ -9774,13 +10052,7 @@ model_cols <- c(
   #-------------------------------------------------------
   
   "diet-20" = "#FDD49E",
-  "diet-20pisciv" = "#E66101",
-  
-  #-------------------------------------------------------
-  # Combined Q/B-30% + cod diet exploratory run
-  #-------------------------------------------------------
-  
-  "qb-30_diet_cod" = "#bf812d"
+  "diet-20pisciv" = "#E66101"
 )
 
 
@@ -11082,3 +11354,19 @@ ggsave(
 #   )
 #   
 # }
+#=========================================================
+# Close the console log
+#=========================================================
+## Flushes and closes the log file opened near the top of this script
+## (right after output_dir was validated). If this line is reached,
+## the run completed without stopping early -- "Run finished" in the
+## log confirms that, vs. a log that just cuts off mid-run after an
+## error further up.
+
+cat("\nRun finished:", format(Sys.time()), "\n")
+
+sink(type = "message")
+sink()
+close(log_con)
+
+cat("Log saved to:", log_file, "\n")
