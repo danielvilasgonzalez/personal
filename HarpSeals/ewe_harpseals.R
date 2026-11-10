@@ -2,6 +2,122 @@ library(data.table)
 library(ggplot2)
 
 #=========================================================
+# Run log (added per request: every run -- including path errors --
+# is now written to a timestamped .txt log file, so a failed run can
+# be diagnosed from the log alone, without re-running or re-typing
+# the console output).
+#=========================================================
+## Logged to getwd() rather than output_dir: output_dir is only
+## computed further down, AFTER root_dir is validated -- and a wrong
+## root_dir (the single most common failure here) is exactly the
+## case this log most needs to survive. getwd() is almost always a
+## real, writable folder when running via Rscript or RStudio "Run";
+## tempdir() is the fallback if that somehow isn't true.
+.log_dir  <- if(dir.exists(getwd())) getwd() else tempdir()
+.log_file <- file.path(
+  .log_dir,
+  paste0("ewe_harpseals_run_log_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".txt")
+)
+.log_con <- file(.log_file, open = "wt")
+sink(.log_con, split = TRUE)      # tee ordinary output to console AND file
+sink(.log_con, type = "message")  # route message()/warning() display to the file (base R can't split this stream, so these stop echoing to console once this line runs -- log_msg() below is used for anything that should still appear in both places)
+
+## Always available for anything that should show up in BOTH the
+## console and the log, even after the message sink above has
+## redirected warning()/message() to the file only.
+log_msg <- function(...) cat(..., "\n", sep = "")
+
+## Walks a path from its root/drive down, logging the first ancestor
+## directory that does NOT exist, plus what IS actually there at
+## that level -- turns "this whole path doesn't exist" into "here is
+## exactly the component that's wrong, and here's what's there
+## instead" (e.g. catches a truncated/misspelled username segment
+## like "danie" vs "daniel" immediately, instead of just reporting
+## the full path as missing).
+diagnose_path <- function(path){
+  norm  <- gsub("\\\\", "/", path)
+  parts <- strsplit(norm, "/")[[1]]
+  parts <- parts[parts != ""]
+  if(length(parts) == 0){
+    log_msg("  '", path, "' has no path components to check.")
+    return(invisible(FALSE))
+  }
+  is_windows_drive <- grepl("^[A-Za-z]:$", parts[1])
+  built       <- if(is_windows_drive) parts[1] else paste0("/", parts[1])
+  parts_rest  <- if(is_windows_drive) parts[-1] else parts[-1]
+  log_msg("  Checking path components of: ", path)
+  log_msg("    ", built, " -- exists: ", dir.exists(built))
+  if(!dir.exists(built)){
+    log_msg("  >>> Even the root/drive '", built, "' was not found on this machine.")
+    return(invisible(FALSE))
+  }
+  last_existing <- built
+  for(p in parts_rest){
+    built <- paste0(built, "/", p)
+    exists_here <- dir.exists(built)
+    log_msg("    ", built, " -- exists: ", exists_here)
+    if(!exists_here){
+      log_msg(
+        "  >>> First missing component: '", p, "' under '", last_existing,
+        "' -- everything above this exists; check spelling/case of '",
+        p, "' and everything after it in root_dir."
+      )
+      siblings <- tryCatch(
+        list.dirs(last_existing, recursive = FALSE, full.names = FALSE),
+        error = function(e) character(0)
+      )
+      if(length(siblings) > 0){
+        log_msg(
+          "  >>> Folders that DO exist under '", last_existing, "': ",
+          paste(siblings, collapse = ", ")
+        )
+      } else {
+        log_msg("  >>> '", last_existing, "' has no subfolders (or couldn't be listed).")
+      }
+      return(invisible(FALSE))
+    }
+    last_existing <- built
+  }
+  log_msg("  Full path exists.")
+  invisible(TRUE)
+}
+
+## Logs the error, the full call stack, and where the log file itself
+## is, then closes the sinks/connection cleanly and exits with a
+## non-zero status under Rscript (left alone under RStudio/interactive
+## use, where quitting the whole R session would be unwelcome).
+.close_log <- function(){
+  log_msg("\n=== End of run: ", format(Sys.time()), " ===")
+  while(sink.number(type = "message") > 0) sink(type = "message")
+  while(sink.number() > 0) sink()
+  close(.log_con)
+}
+options(error = function(){
+  sink(.log_con, type = "message")  # back to the file in case a warning mid-script left this pointed elsewhere
+  log_msg("\n*** UNCAUGHT ERROR -- run stopped here ***")
+  log_msg("Error message: ", geterrmessage())
+  log_msg("Call stack:")
+  calls <- sys.calls()
+  if(!is.null(calls)) for(i in seq_along(calls)) log_msg("  ", i, ": ", paste(deparse(calls[[i]]), collapse = " "))
+  log_msg("Full run log written to: ", .log_file)
+  .close_log()
+  if(!interactive()) quit(save = "no", status = 1, runLast = FALSE)
+})
+
+cat(
+  "===========================================================\n",
+  "ewe_harpseals.R run log\n",
+  "Started: ", format(Sys.time()), "\n",
+  "R version: ", R.version.string, "\n",
+  "Platform: ", R.version$platform, "\n",
+  "OS (Sys.info): ", paste(Sys.info()[c("sysname", "release", "machine")], collapse = " / "), "\n",
+  "Working directory (getwd()): ", getwd(), "\n",
+  "Log file: ", .log_file, "\n",
+  "===========================================================\n",
+  sep = ""
+)
+
+#=========================================================
 # Settings
 #=========================================================
 
@@ -21,17 +137,29 @@ library(ggplot2)
 ## like "C:/Users/daniel/Desktop/HarpSeals/outputs/sim/" (forward
 ## slashes work fine in R on Windows too) -- then re-run. The
 ## dir.exists() check right after this now fails loudly and clearly
-## instead of producing that cryptic error if the path is still wrong.
-root_dir <- "C:/Users/danie/Desktop/HarpSeals/outputs/sim/"
+## instead of producing that cryptic error if the path is still wrong,
+## and logs exactly which path component is wrong (see diagnose_path()
+## above) instead of just the whole path.
+## CORRECTED 2026-11-09: this is run on Daniel's Mac (confirmed --
+## the stray "C:/Users/danie/..." above was a leftover Windows-style
+## placeholder, and the run log it produced was written under
+## /Users/daniel/... , confirming the Mac). root_dir now points at
+## the real outputs/sim folder on this machine (Downloads/outputs/sim,
+## confirmed to contain 1985_1988, 2013-2015, 2018-2020_N50/N80/S20/S50).
+root_dir <- "/Users/daniel/Downloads/outputs/sim/"
 
 if(!dir.exists(root_dir)){
+  log_msg("root_dir does not exist -- diagnosing which component is wrong:")
+  diagnose_path(root_dir)
   stop(
     "root_dir does not exist on this machine: '", root_dir, "'. ",
     "This is almost always just the wrong path for the computer ",
     "you're currently running R on (e.g. a macOS path left in place ",
     "while running on Windows, or vice versa) -- edit root_dir near ",
     "the top of this script to point at your actual outputs/sim ",
-    "folder on THIS machine before re-running."
+    "folder on THIS machine before re-running. See the component-by-",
+    "component check just above (and in ", .log_file, ") for exactly ",
+    "which part of the path is wrong."
   )
 }
 
@@ -49,6 +177,8 @@ if(!dir.exists(root_dir)){
 output_dir <- dirname(root_dir)
 
 if(!dir.exists(output_dir)){
+  log_msg("output_dir does not exist -- diagnosing which component is wrong:")
+  diagnose_path(output_dir)
   stop(
     "output_dir does not exist on this machine: '", output_dir, "'. ",
     "This is derived from root_dir via dirname() and should already ",
@@ -57,6 +187,15 @@ if(!dir.exists(output_dir)){
     "near the top of this script."
   )
 }
+
+log_msg("root_dir   = ", root_dir, " (OK)")
+log_msg("output_dir = ", output_dir, " (OK)")
+
+## From here on, once the script finishes normally (falls off the
+## end rather than stopping on an error), the log is closed here too
+## -- without this, a successful run's log file would stay open/
+## unflushed until the R session itself ends.
+reg.finalizer(environment(), function(e) .close_log(), onexit = TRUE)
 
 # Pattern used to identify the harp seal group
 harp_pattern <- "(?i)(harp.*seal|seal.*harp)"
@@ -976,75 +1115,109 @@ cat(length(model_dirs), "simulation folders found\n")
 # Process models
 #=========================================================
 
+## Per request: a problem in any ONE model folder (a missing/renamed
+## subdirectory, an unexpected column, no harp seal row -- anything
+## that would otherwise `stop()` inside this loop) must not halt
+## processing of every OTHER model folder. Wrapped in tryCatch, same
+## pattern already used in the Q/Y loop further down: on error, log
+## it (console + run log) and skip just that one model, continuing
+## with the rest. `model_dirs` itself already excludes any directory
+## lacking the required files (see the vapply() filter above), so
+## this loop only ever runs for structurally present folders -- this
+## tryCatch covers everything else that can still go wrong inside
+## one of them (bad headers, missing harp seal row, etc.).
 results <- rbindlist(
-  
+
   lapply(model_dirs, function(model){
     cat("\nProcessing:", model, "\n")
-    
-    mort_file <- list.files(
-      model,
-      pattern = "Mortalit.*\\.csv$",
-      full.names = TRUE,
-      ignore.case = TRUE
-    )[1]
-    
-    pred_file <- list.files(
-      model,
-      pattern = "Predation.*mortality.*\\.csv$",
-      full.names = TRUE,
-      ignore.case = TRUE
-    )[1]
-    
-    mort <- read.csv(
-      mort_file,
-      check.names = FALSE,
-      stringsAsFactors = FALSE,
-      dec = ","
-    )
-    
-    pred <- read.csv(
-      pred_file,
-      check.names = FALSE,
-      stringsAsFactors = FALSE,
-      dec = ","
-    )
-    
-    mort <- as.data.table(mort)
-    pred <- as.data.table(pred)
-    
-    setnames(mort, 1, "GroupID")
-    setnames(pred, 1, "GroupID")
-    setnames(pred, 2, "Group")
-    
-    cat("\nChecking group IDs...\n")
-    
-    tmp <- merge(
-      mort[, .(GroupID, MortName = `Group name`)],
-      pred[, .(GroupID, PredName = Group)],
-      by = "GroupID",
-      all = TRUE
-    )
-    
-    print(tmp)
-    
-    out <- compare_predator_vs_fishing(
-      mort,
-      pred
-    )
-    
-    ## Folder structure:
-    ## sim/1985_1988/baseline
-    
-    out[, Simulation := basename(dirname(model))]
-    out[, Model := basename(model)]
-    
-    out
-    
+
+    tryCatch({
+
+      mort_file <- list.files(
+        model,
+        pattern = "Mortalit.*\\.csv$",
+        full.names = TRUE,
+        ignore.case = TRUE
+      )[1]
+
+      pred_file <- list.files(
+        model,
+        pattern = "Predation.*mortality.*\\.csv$",
+        full.names = TRUE,
+        ignore.case = TRUE
+      )[1]
+
+      mort <- read.csv(
+        mort_file,
+        check.names = FALSE,
+        stringsAsFactors = FALSE,
+        dec = ","
+      )
+
+      pred <- read.csv(
+        pred_file,
+        check.names = FALSE,
+        stringsAsFactors = FALSE,
+        dec = ","
+      )
+
+      mort <- as.data.table(mort)
+      pred <- as.data.table(pred)
+
+      setnames(mort, 1, "GroupID")
+      setnames(pred, 1, "GroupID")
+      setnames(pred, 2, "Group")
+
+      cat("\nChecking group IDs...\n")
+
+      tmp <- merge(
+        mort[, .(GroupID, MortName = `Group name`)],
+        pred[, .(GroupID, PredName = Group)],
+        by = "GroupID",
+        all = TRUE
+      )
+
+      print(tmp)
+
+      out <- compare_predator_vs_fishing(
+        mort,
+        pred
+      )
+
+      ## Folder structure:
+      ## sim/1985_1988/baseline
+
+      out[, Simulation := basename(dirname(model))]
+      out[, Model := basename(model)]
+
+      out
+
+    }, error = function(e){
+
+      warning(
+        "M2/F processing failed for ", model, ": ", conditionMessage(e),
+        " -- skipping this model/Simulation, continuing with the rest."
+      )
+
+      NULL
+
+    })
+
   }),
-  
+
   fill = TRUE
-  
+
 )
+
+if(is.null(results) || nrow(results) == 0){
+  warning(
+    "results is empty -- M2/F processing failed or found nothing for ",
+    "EVERY model folder under root_dir. Downstream M2/F-based tables",
+    " and figures will be empty, but the rest of the script will",
+    " still run. Check the run log (", .log_file, ") for the",
+    " per-model errors logged above."
+  )
+}
 
 #=========================================================
 # Combine N/S sub-models (area-weighted) + rename 1985_1988
@@ -1556,58 +1729,85 @@ fwrite(
 ##   - biomass column used: "Biomass (t/km^2)" (habitat-area-normalized
 ##     biomass; NOT "Biomass in habitat area (t/km^2)")
 
+## Same reasoning as the M2/F loop above: wrapped in tryCatch so one
+## model folder's bad/unexpected biomass file (missing column, odd
+## encoding, etc.) is logged and skipped rather than halting every
+## other model's biomass processing too.
 biomass_results <- rbindlist(
-  
+
   lapply(model_dirs, function(model){
-    
-    biomass_file <- list.files(
-      model,
-      pattern = "Basic.*estimates.*\\.csv$",
-      full.names = TRUE,
-      ignore.case = TRUE
-    )[1]
-    
-    if(is.na(biomass_file)) return(NULL)
-    
-    cat("\nReading biomass:", biomass_file, "\n")
-    
-    bio <- read.csv(
-      biomass_file,
-      check.names = FALSE,
-      stringsAsFactors = FALSE,
-      dec = ","
-    )
-    
-    bio <- as.data.table(bio)
-    setnames(bio, 1, "GroupID")
-    
-    ## Drop section-header rows (blank GroupID, e.g. ",cod,,,,,,,,,,,")
-    bio[, GroupID := suppressWarnings(as.integer(GroupID))]
-    bio <- bio[!is.na(GroupID)]
-    
-    if(!"Biomass (t/km^2)" %in% names(bio))
-      stop(
-        "Column 'Biomass (t/km^2)' not found in ", biomass_file,
-        " -- check the header spelling/encoding."
+
+    tryCatch({
+
+      biomass_file <- list.files(
+        model,
+        pattern = "Basic.*estimates.*\\.csv$",
+        full.names = TRUE,
+        ignore.case = TRUE
+      )[1]
+
+      if(is.na(biomass_file)) return(NULL)
+
+      cat("\nReading biomass:", biomass_file, "\n")
+
+      bio <- read.csv(
+        biomass_file,
+        check.names = FALSE,
+        stringsAsFactors = FALSE,
+        dec = ","
       )
-    
-    bio[, Group := clean_group_names(`Group name`)]
-    bio[, Biomass := as.numeric(`Biomass (t/km^2)`)]
-    
-    out <- bio[, .(GroupID, Group, Biomass)]
-    out[, Simulation := basename(dirname(model))]
-    out[, Model := basename(model)]
-    
-    out
-    
+
+      bio <- as.data.table(bio)
+      setnames(bio, 1, "GroupID")
+
+      ## Drop section-header rows (blank GroupID, e.g. ",cod,,,,,,,,,,,")
+      bio[, GroupID := suppressWarnings(as.integer(GroupID))]
+      bio <- bio[!is.na(GroupID)]
+
+      if(!"Biomass (t/km^2)" %in% names(bio))
+        stop(
+          "Column 'Biomass (t/km^2)' not found in ", biomass_file,
+          " -- check the header spelling/encoding."
+        )
+
+      bio[, Group := clean_group_names(`Group name`)]
+      bio[, Biomass := as.numeric(`Biomass (t/km^2)`)]
+
+      out <- bio[, .(GroupID, Group, Biomass)]
+      out[, Simulation := basename(dirname(model))]
+      out[, Model := basename(model)]
+
+      out
+
+    }, error = function(e){
+
+      warning(
+        "Biomass processing failed for ", model, ": ", conditionMessage(e),
+        " -- skipping this model/Simulation, continuing with the rest."
+      )
+
+      NULL
+
+    })
+
   }),
-  
+
   fill = TRUE
-  
+
 )
 
-if(is.null(biomass_results) || nrow(biomass_results) == 0)
-  stop("No 'Basic estimates' biomass files were found in any model folder.")
+if(is.null(biomass_results) || nrow(biomass_results) == 0){
+  warning(
+    "No 'Basic estimates' biomass files were found/readable in ANY ",
+    "model folder. Biomass-dependent tables and figures (including",
+    " the biomass-weighted West comparison) will be empty, but the",
+    " rest of the script will still run rather than stopping here."
+  )
+  biomass_results <- data.table(
+    GroupID = integer(0), Group = character(0), Biomass = numeric(0),
+    Simulation = character(0), Model = character(0)
+  )
+}
 
 ## Combine N/S sub-models (area-weighted) + rename 1985_1988, same
 ## treatment as `results` above.
@@ -1990,70 +2190,120 @@ if(is.na(harp_biomass_file)){
 
 baseline_dirs <- model_dirs[basename(model_dirs) == "baseline"]
 
+## Wrapped in tryCatch (same pattern as the two loops above): one
+## baseline folder's bad/unexpected Basic_estimates file (missing
+## Q/B column, etc.) is logged and skipped, not fatal to every other
+## Simulation's baseline biomass.
 biomass_baseline <- rbindlist(
-  
+
   lapply(baseline_dirs, function(model){
-    
-    basic_file <- list.files(
-      model,
-      pattern = "Basic.*estimates.*\\.csv$",
-      full.names = TRUE,
-      ignore.case = TRUE
-    )[1]
-    
-    if(is.na(basic_file)) return(NULL)
-    
-    basic <- read.csv(
-      basic_file,
-      check.names = FALSE,
-      stringsAsFactors = FALSE,
-      dec = ","
-    )
-    basic <- as.data.table(basic)
-    setnames(basic, 1, "GroupID")
-    basic[, GroupID := suppressWarnings(as.integer(GroupID))]
-    basic <- basic[!is.na(GroupID)]
-    basic[, Group := clean_group_names(`Group name`)]
-    basic[, Biomass := as.numeric(`Biomass (t/km^2)`)]
-    
-    qb_col <- find_col(
-      basic,
-      "consumption\\s*/?\\s*biomass|q\\.?/?b",
-      paste0(basic_file, " (Q/B)")
-    )
-    basic[, QB := as.numeric(get(qb_col))]
-    
-    sim_name <- basename(dirname(model))
-    
-    seal_qb_file   <- basic[grepl(harp_pattern, Group, perl = TRUE)][1]$QB
-    seal_qb_lookup <- seal_qb_diet_lookup[
-      Simulation == sim_name & Model == "baseline"
-    ]$QB_seal
-    
-    if(length(seal_qb_lookup) == 1 && !is.na(seal_qb_file) &&
-       abs(seal_qb_file - seal_qb_lookup) > 0.01){
-      warning(
-        "Baseline Q/B for harp seal in ", basic_file, " (", seal_qb_file,
-        ") doesn't match the hardcoded value from HarpSealTEST.xlsx (",
-        seal_qb_lookup, ") for Simulation '", sim_name, "' -- check",
-        " which is current before trusting Q/Y."
+
+    tryCatch({
+
+      basic_file <- list.files(
+        model,
+        pattern = "Basic.*estimates.*\\.csv$",
+        full.names = TRUE,
+        ignore.case = TRUE
+      )[1]
+
+      if(is.na(basic_file)) return(NULL)
+
+      basic <- read.csv(
+        basic_file,
+        check.names = FALSE,
+        stringsAsFactors = FALSE,
+        dec = ","
       )
-    }
-    
-    basic[, Simulation := sim_name]
-    basic[, .(GroupID, Group, Biomass, QB, Simulation)]
-    
+      basic <- as.data.table(basic)
+      setnames(basic, 1, "GroupID")
+      basic[, GroupID := suppressWarnings(as.integer(GroupID))]
+      basic <- basic[!is.na(GroupID)]
+      basic[, Group := clean_group_names(`Group name`)]
+      basic[, Biomass := as.numeric(`Biomass (t/km^2)`)]
+
+      qb_col <- find_col(
+        basic,
+        "consumption\\s*/?\\s*biomass|q\\.?/?b",
+        paste0(basic_file, " (Q/B)")
+      )
+      basic[, QB := as.numeric(get(qb_col))]
+
+      ## Hab area (proportion): Ecopath's own habitat-area-dilution
+      ## factor, read directly from Basic estimates.csv so the Harp
+      ## seal biomass-CSV fix below (see the Q_seal block) doesn't
+      ## depend on a hardcoded constant. Confirmed via direct
+      ## inspection of every baseline model's own Basic estimates.csv:
+      ## "Biomass (t/km^2)" (whole-model-area biomass, what Predator_M2
+      ## is actually computed from) = "Biomass in habitat area (t/km^2)"
+      ## x "Hab area (proportion)", EXACTLY, for Harp seal in every
+      ## single baseline model (1985-1987: 0.534 x 0.400 = 0.2136 ~=
+      ## 0.214; 2013-2015: 0.665 x 0.400 = 0.266; 2018-2020 N50: 0.707 x
+      ## 0.400 = 0.2828; S50: 0.652 x 0.400 = 0.2608 ~= 0.261; N80:
+      ## 1.131 x 0.400 = 0.4524; S20: 0.261 x 0.400 = 0.1044). This is
+      ## the exact mechanism behind the Cause 2 Q/Y gap: HarpSeal_
+      ## biomass.csv stores "Biomass in habitat area", not "Biomass
+      ## (t/km^2)", so using it unconverted inflates Q_seal (and every
+      ## downstream Q_species/Q/Y) by exactly 1/0.400 = 2.5x relative to
+      ## what Predator_M2 (and this script's own Biomass column) is
+      ## actually expressed in.
+      hab_col <- find_col(
+        basic,
+        "hab\\.?\\s*area|habitat\\s*area",
+        paste0(basic_file, " (Hab area proportion)")
+      )
+      basic[, HabAreaProportion := as.numeric(get(hab_col))]
+
+      sim_name <- basename(dirname(model))
+
+      seal_qb_file   <- basic[grepl(harp_pattern, Group, perl = TRUE)][1]$QB
+      seal_qb_lookup <- seal_qb_diet_lookup[
+        Simulation == sim_name & Model == "baseline"
+      ]$QB_seal
+
+      if(length(seal_qb_lookup) == 1 && !is.na(seal_qb_file) &&
+         abs(seal_qb_file - seal_qb_lookup) > 0.01){
+        warning(
+          "Baseline Q/B for harp seal in ", basic_file, " (", seal_qb_file,
+          ") doesn't match the hardcoded value from HarpSealTEST.xlsx (",
+          seal_qb_lookup, ") for Simulation '", sim_name, "' -- check",
+          " which is current before trusting Q/Y."
+        )
+      }
+
+      basic[, Simulation := sim_name]
+      basic[, .(GroupID, Group, Biomass, QB, HabAreaProportion, Simulation)]
+
+    }, error = function(e){
+
+      warning(
+        "Baseline biomass/Q-B processing failed for ", model, ": ",
+        conditionMessage(e),
+        " -- skipping this Simulation's baseline, continuing with the rest."
+      )
+
+      NULL
+
+    })
+
   }),
-  
+
   fill = TRUE
-  
+
 )
 
-if(is.null(biomass_baseline) || nrow(biomass_baseline) == 0)
-  stop(
+if(is.null(biomass_baseline) || nrow(biomass_baseline) == 0){
+  warning(
     "No baseline 'Basic estimates' file could be read for any ",
-    "Simulation -- Q/Y can't be computed without it."
+    "Simulation -- Q/Y-dependent tables and figures will be empty,",
+    " but continuing with the rest of the script rather than",
+    " stopping here."
   )
+  biomass_baseline <- data.table(
+    GroupID = integer(0), Group = character(0), Biomass = numeric(0),
+    QB = numeric(0), HabAreaProportion = numeric(0), Simulation = character(0)
+  )
+}
 
 #=========================================================
 # Harp seal Q/B: consolidated table across ALL models/simulations
@@ -2893,11 +3143,41 @@ qy_results <- rbindlist(
       biomass_csv_row <- seal_biomass_csv_lookup[
         Simulation == sim_name & Model == model_name
       ]
-      
+
       if(nrow(biomass_csv_row) == 1){
-        
-        seal_row$Biomass <- biomass_csv_row$Biomass_Seal_CSV
-        
+
+        ## FIX (Cause 2 of the Q/Y gap): HarpSeal_biomass.csv stores
+        ## "Biomass in habitat area (t/km^2)", NOT "Biomass (t/km^2)"
+        ## -- confirmed by direct comparison against every baseline
+        ## model's own Basic estimates.csv (see HabAreaProportion's
+        ## definition above). Using the CSV value directly (as an
+        ## earlier version of this script did) inflates Q_seal, and
+        ## every downstream Q_species/Q/Y, by 1/HabAreaProportion (a
+        ## confirmed, exact 2.5x in every baseline model checked) --
+        ## this IS the Ecopath-implied-vs-reconstructed-consumption
+        ## offset documented in the Cause 2 section/figure below.
+        ## Multiplying by HabAreaProportion converts the CSV's within-
+        ## habitat-area density to the whole-model-area basis that
+        ## Predator_M2 (and this script's own `Biomass` column) is
+        ## actually expressed in, making Q_seal internally consistent
+        ## with M2/F -- this is necessary for the biomass-sensitivity
+        ## variants (b-30/b-15/b+15/b+30), which have no Basic
+        ## estimates.csv of their own and rely entirely on this CSV
+        ## for a biomass value different from baseline's.
+        if(is.na(seal_row$HabAreaProportion) || seal_row$HabAreaProportion <= 0 ||
+           seal_row$HabAreaProportion > 1){
+          warning(
+            "Harp seal HabAreaProportion is missing or out of (0,1] for ",
+            sim_name, "/", model_name, " (", seal_row$HabAreaProportion,
+            ") -- using the HarpSeal_biomass.csv value UNCONVERTED, which",
+            " is almost certainly wrong (see Cause 2 comment above). Check",
+            " Basic estimates.csv's 'Hab area (proportion)' column."
+          )
+        } else {
+          seal_row$Biomass <- biomass_csv_row$Biomass_Seal_CSV *
+            seal_row$HabAreaProportion
+        }
+
       } else {
         
         is_biomass_variant <- model_name %in% 
@@ -3869,7 +4149,956 @@ if(exists("qy_results") && nrow(qy_results) > 0){
   
   cat("\nSpecies-level summary (seal prey vs exploited seal prey):\n")
   print(species_level_summary)
-  
+
+}
+
+#=========================================================
+# Fish-only exploited-FG average, weighted and unweighted,
+# held to the SAME FG composition across every Simulation/
+# Model (per explicit request, following up on the "undefined
+# averaging" critique raised re: West et al. (2025)'s pooled
+# 17x / 24x headline -- see Section 3.3/3.4/Conclusions of the
+# report).
+#
+# CONFIRMED from West et al. (2025) itself (Figs. 5-6, Section
+# 3.2/3.3.1, now available): the published 17x/24x (and 1.3x/1.7x)
+# headline is computed for a FIXED, NAMED set of exactly 8 fish
+# species -- American plaice, Arctic cod, Atlantic cod, capelin,
+# Greenland halibut, Atlantic herring, redfish, and sand lance,
+# with American plaice and Atlantic cod restricted to fish >35 cm
+# -- by SUMMING M2 (and F, Q, Y) across that set and taking the
+# ratio of the sums ("Harp seal consumption and fisheries catch
+# rates were summed and compared for shared fish and invertebrate
+# prey separately," West et al., 2025, Section 3.2), NOT by
+# averaging each species' own ratio. West et al. (2025) exclude
+# Cod juvenile entirely, along with every other FG in this script's
+# broader "exploited harp seal prey FGs" set (Haddock, Yellowtail
+# flounder, Witch flounder, Thorny skate, Silver hake/Saithe/
+# Pollock, Other piscivorous fish, the 3 benthivorous-fish FGs,
+# Other planktivorous fish), and they treat Shrimp/Snow crab/Squid
+# as a SEPARATE invertebrate group with its own, different ratio.
+#
+# This section therefore computes, for comparison, BOTH:
+#   (a) `west_fish_species` -- West et al.'s (2025) own exact
+#       8-species fish set, mapped to this model's Group names, so
+#       as close a same-method reproduction as possible of their
+#       "ratio of sums" calculation can be run on our own EwE
+#       output; and
+#   (b) `exploited_fish_species` -- the broader fish-only subset of
+#       this model's own "exploited harp seal prey FGs" (Section
+#       2.5), i.e. every fish FG with nonzero diet AND nonzero F
+#       somewhere, NOT restricted to West's 8 species -- kept for
+#       context, but NOT a reproduction of West's number.
+# For both sets, 4 summary statistics are produced per Simulation/
+# Model: the unweighted mean of per-species ratios, the
+# biomass-weighted mean of per-species ratios, the (unweighted)
+# ratio of summed M2/F or Q/Y -- i.e. West et al.'s (2025) own
+# method -- and a biomass-weighted analogue of that ratio-of-sums.
+# None of these reproduce West's exact published numbers (this
+# model's own FG structure, diet data, and parametrization differ
+# from theirs throughout this report), but (a)'s ratio-of-sums
+# column is the closest same-method comparison available.
+#=========================================================
+
+## ---- West et al.'s (2025) own 8-species fish set ----
+## Mapped from their Fig. 5/6 axis labels (AmPlaice>35, ArcticCod,
+## AtlanticCod>35, Capelin, GLHalibut, Herring, Redfish, Sandlance)
+## to this model's Group names. AmPlaice>35 and AtlanticCod>35 are
+## the ADULT (>35 cm) FGs specifically -- West et al. (2025) do not
+## include American Plaice juvenile or Cod juvenile in this set at
+## all. REVIEW before trusting if this model's Group names change.
+## Size-cutoff check: this model's "Cod adult" stanza is itself
+## defined at >35 cm (confirmed directly from this model's own
+## EwE_CodStanza_MassBalanceCheck_OriginalVsAdjusted.csv, which
+## labels the two cod stanzas "Adult (>35cm)" / "Juvenile (<35cm)"),
+## and "American Plaice adult" is likewise >35 cm in this model
+## (confirmed directly, not derived from an output file) -- both
+## match West et al.'s (2025) stated >35 cm cutoff for these two
+## species exactly, so no size-definition mismatch inflates the
+## ratio-of-sums comparison below for either species.
+west_fish_species <- c(
+  "American Plaice adult",  # West's "AmPlaice>35"
+  "Arctic cod",              # West's "ArcticCod"
+  "Cod adult",               # West's "AtlanticCod>35"
+  "Capelin",                 # West's "Capelin"
+  "Greenland halibut",       # West's "GLHalibut"
+  "Herring",                 # West's "Herring" (Atlantic herring)
+  "Redfish",                 # West's "Redfish"
+  "Sandlance"                # West's "Sandlance" (sand lance)
+)
+
+## Subset of the above 8 that actually have nonzero F (and therefore
+## a genuine M2/F ratio) in this model: Arctic cod has F == 0 in
+## EVERY period/model this script has run (never "exploited" in this
+## EwE reproduction), and Sandlance has F == 0 outside 1985-1987. A
+## plain sum-of-M2-over-sum-of-F across the full 8 species credits
+## Arctic cod's and Sandlance's nonzero M2 to the numerator while
+## they add nothing to the denominator -- inflating the pooled M2/F
+## ratio for free. Restricting to this 6-species subset is what
+## brought this model's pooled M2/F into close agreement with West
+## et al.'s (2025) published M2/F (within a few percent in every
+## period, almost exact in 1985-1987 and 2018-2020_5050) -- see
+## HarpSeal_WestGap_Cause1_SpeciesSetEffect.png and the
+## M2F_pooled_simulated_6species column below. NOT applied to Q/Y:
+## the Q/Y gap has a different cause (see the Ecopath-implied-vs-
+## reconstructed-consumption section above/below and
+## HarpSeal_WestGap_Cause2_ImpliedVsReconstructed.png) that this
+## species restriction does not fix.
+west_fish_species_nonzeroF <- setdiff(
+  west_fish_species, c("Arctic cod", "Sandlance")
+)
+
+unmapped_west_fish <- setdiff(west_fish_species, unique(results$Group))
+if(length(unmapped_west_fish) > 0){
+  warning(
+    "west_fish_species names not found in results$Group -- check",
+    " this model's Group naming against West et al.'s (2025) Fig.",
+    " 5/6 labels before trusting the West-matched average: ",
+    paste(unmapped_west_fish, collapse = ", ")
+  )
+}
+
+## ---- Broader fish-only subset of this model's "exploited" FGs ----
+## For context only (NOT a reproduction of West's number -- see
+## header comment above). Hand-classified from the FG names used
+## throughout this script. REVIEW before trusting, and especially
+## before re-running on a model version with different FG names:
+## anything not listed here is EXCLUDED rather than guessed.
+fg_taxon <- data.table(
+  Group = c(
+    "Cod adult", "Cod juvenile", "Herring", "Capelin", "Arctic cod",
+    "Redfish", "Sandlance", "American Plaice adult",
+    "American Plaice juvenile", "Greenland halibut",
+    "Yellowtail flounder", "Witch flounder", "Haddock",
+    "Thorny skate", "Silver hake/Saithe/Pollock",
+    "Other piscivorous fish", "Small benthivorous fish",
+    "Medium benthivorous fish", "Large benthivorous fish",
+    "Other planktivorous fish"
+  ),
+  Taxon = "Fish"
+)
+fg_taxon <- rbind(
+  fg_taxon,
+  data.table(
+    Group = c(
+      "Shrimp", "Snow crab", "Squid", "Macrozooplankton",
+      "Predatory invertebrates", "Deposit feeding invertebrates",
+      "Suspension feeding invertebrates"
+    ),
+    Taxon = "Invertebrate"
+  )
+)
+
+exploited_fish_species <- character(0)
+if(exists("exploited_species")){
+
+  unclassified <- setdiff(exploited_species, fg_taxon$Group)
+  if(length(unclassified) > 0){
+    warning(
+      "fg_taxon does not classify the following exploited FG(s) -- ",
+      "they will be EXCLUDED from the broader fish-only set rather",
+      " than guessed: ", paste(unclassified, collapse = ", ")
+    )
+  }
+
+  exploited_fish_species <- intersect(
+    exploited_species,
+    fg_taxon[Taxon == "Fish"]$Group
+  )
+
+  cat(
+    "\nExploited seal prey FGs restricted to fish only, broader set (",
+    length(exploited_fish_species), " of ",
+    length(exploited_species), " exploited FGs): ",
+    paste(exploited_fish_species, collapse = ", "), "\n",
+    sep = ""
+  )
+
+}
+
+## ---- Raw M2/F and Q/Y lookups (needed for ratio-of-sums) ----
+## `ratio_compare` only carries the two already-divided ratios; West
+## et al.'s (2025) own method sums the numerator and denominator
+## SEPARATELY before dividing (see header comment), so the raw
+## Predator_M2/Fishing (for M2/F) and Q_species/Y_species (for Q/Y)
+## values are needed here, not just the ratios.
+## NOTE: no Biomass here. `results` (built by compare_predator_vs_
+## fishing() from the Mortality/Predation-mortality files) never had
+## a Biomass column at all -- Biomass only exists in the SEPARATE
+## `biomass_results`/`biomass_baseline` tables, built from a
+## different file ("Basic estimates"). A biomass-weighted version of
+## this comparison was attempted and failed with "object 'Biomass'
+## not found" for exactly this reason. Per Andrea's instruction, this
+## is NOT being re-wired to join biomass in -- the weighted variants
+## are dropped entirely below (compute_fixed_fg_average and
+## compute_west_published_comparison both now report only the plain/
+## unweighted average, which is also the one that matches West et
+## al.'s, 2025, own published method and figure).
+m2f_raw <- if(exists("results")){
+  unique(results[, .(
+    Simulation = as.character(Simulation),
+    Model = as.character(Model),
+    Group,
+    M2 = Predator_M2,
+    F_ = Fishing
+  )])
+} else NULL
+
+qy_raw <- if(exists("qy_results")){
+  unique(qy_results[, .(
+    Simulation = as.character(Simulation),
+    Model = as.character(Model),
+    Group,
+    Q = Q_species,
+    Y = Y_species
+  )])
+} else NULL
+
+## ---- Core function: fixed-composition FG average, 4 variants ----
+## `fg_set`: candidate FG names (e.g. west_fish_species or
+## exploited_fish_species). `label`: used in file names / messages.
+## Restricts to the INTERSECTION of `fg_set` with FGs that have a
+## valid (nonzero, finite) M2/F AND Q/Y ratio in EVERY Simulation/
+## Model present in `ratio_compare`, so the same FG composition
+## underlies the average in every period/scenario compared --
+## directly addressing the "FG composition may differ period to
+## period" caveat added to the report's Section 3.3/3.4. Returns a
+## list(averages = <per Sim/Model summary>, vs_average = <each FG's
+## own values vs. the 4 group summaries>, common_fgs = <character>)
+## or NULL (with a warning) if no FG qualifies in every Sim/Model.
+compute_fixed_fg_average <- function(fg_set, label, output_dir){
+
+  if(!exists("ratio_compare") || length(fg_set) == 0) return(NULL)
+
+  valid_by_sim <- ratio_compare[
+    Group %in% fg_set &
+      !is.na(M2_over_F) & M2_over_F > 0 &
+      !is.na(Q_over_Y) & Q_over_Y > 0,
+    .(Group, SimModel = paste(Simulation, Model, sep = "__"))
+  ]
+
+  if(nrow(valid_by_sim) == 0){
+    warning(
+      "[", label, "] No FG in fg_set has a valid ratio anywhere --",
+      " cannot compute a fixed-composition average."
+    )
+    return(NULL)
+  }
+
+  ## ---- Explicit per-species, per-Simulation/Model exploited-status
+  ## diagnostic -- "debate" whether each candidate FG was actually
+  ## exploited (nonzero F, with a valid M2/F AND Q/Y ratio) in EVERY
+  ## model, rather than only reporting the final intersection. This
+  ## matters specifically for West et al.'s (2025) own 8-species set
+  ## (west_fish_species): this report's own Table 3 already shows,
+  ## for the 3 baseline models it covers, that Arctic cod has NO
+  ## row at all (F == 0 in every model shown -- never exploited in
+  ## this EwE reproduction) and Sandlance has a valid ratio only in
+  ## 1985-1987, with "0 (F)" in both 2018-2020 models -- i.e. 2 of
+  ## West's 8 named fish species do not meet this model's own
+  ## "exploited" criterion consistently, even though West et al.
+  ## (2025) pool them into the published fish headline regardless.
+  all_sim_models <- unique(ratio_compare[, .(Simulation, Model)])
+  all_sim_models[, SimModel := paste(Simulation, Model, sep = "__")]
+
+  fg_status <- CJ(Group = fg_set, SimModel = all_sim_models$SimModel)
+  fg_status[, Exploited_valid_ratio := paste(Group, SimModel) %in%
+    paste(valid_by_sim$Group, valid_by_sim$SimModel)]
+
+  fg_status_summary <- fg_status[, .(
+    N_models_exploited = sum(Exploited_valid_ratio),
+    N_models_total = .N
+  ), by = Group]
+  fg_status_summary[, Exploited_in_all_models :=
+    N_models_exploited == N_models_total]
+  setorder(fg_status_summary, Exploited_in_all_models, Group)
+
+  cat(
+    "\n[", label, "] Exploited-status diagnostic -- for each candidate",
+    " FG, how many of the ", nrow(all_sim_models), " Simulation/Model",
+    " combinations give it a valid (nonzero F, nonzero M2/F AND Q/Y)",
+    " ratio:\n", sep = ""
+  )
+  print(fg_status_summary)
+
+  not_always_exploited <- fg_status_summary[
+    Exploited_in_all_models == FALSE
+  ]$Group
+  if(length(not_always_exploited) > 0){
+    warning(
+      "[", label, "] The following candidate FG(s) are NOT exploited",
+      " (valid nonzero-F ratio) in every Simulation/Model, and will",
+      " therefore be DROPPED from the fixed-composition average below",
+      " -- inspect fg_status_summary / fg_status to see exactly which",
+      " Simulation/Model combinations fail for each: ",
+      paste(not_always_exploited, collapse = ", ")
+    )
+  }
+
+  fwrite(
+    fg_status,
+    file.path(output_dir, paste0(
+      "HarpSeal_ExploitedStatus_ByFGAndModel_", label, ".csv"
+    ))
+  )
+
+  common_fgs <- Reduce(
+    intersect,
+    split(valid_by_sim$Group, valid_by_sim$SimModel)
+  )
+
+  cat(
+    "\n[", label, "] FG set common to every Simulation/Model (",
+    length(common_fgs), " of ", length(fg_set), " candidate FGs): ",
+    paste(sort(common_fgs), collapse = ", "), "\n",
+    sep = ""
+  )
+
+  if(length(common_fgs) == 0){
+    warning(
+      "[", label, "] No FG has a valid ratio in EVERY Simulation/",
+      "Model -- the fixed-composition average cannot be computed as",
+      " specified. Inspect valid_by_sim to see which FG/Simulation",
+      " combinations are missing before relaxing this to a partial",
+      " or model-specific FG set."
+    )
+    return(NULL)
+  }
+
+  fixed_data <- merge(
+    ratio_compare[Group %in% common_fgs],
+    m2f_raw, by = c("Simulation", "Model", "Group"), all.x = TRUE
+  )
+  fixed_data <- merge(
+    fixed_data,
+    qy_raw, by = c("Simulation", "Model", "Group"), all.x = TRUE
+  )
+
+  if(anyNA(fixed_data$M2) || anyNA(fixed_data$F_) ||
+     anyNA(fixed_data$Q) || anyNA(fixed_data$Y)){
+    warning(
+      "[", label, "] Some Simulation/Model/Group rows in the fixed",
+      " FG set are missing M2, F, Q, or Y -- affected rows are",
+      " dropped (na.rm = TRUE) from whichever statistic needs that",
+      " column, not from every statistic."
+    )
+  }
+
+  ## Biomass-weighted variants were dropped here: `results` (the
+  ## source of M2/F) never carried a Biomass column (that only exists
+  ## in the separate biomass_results/biomass_baseline tables, read
+  ## from a different file), so the weighted versions of these
+  ## statistics were never computable from this data and were
+  ## removed rather than wired up to a second join -- per Andrea's
+  ## instruction, this reports only the plain/unweighted average.
+  averages <- fixed_data[, .(
+    N_FG = .N,
+    ## (1) Unweighted mean of each FG's own ratio
+    M2F_mean_of_ratios_unweighted = mean(M2_over_F, na.rm = TRUE),
+    QY_mean_of_ratios_unweighted  = mean(Q_over_Y,  na.rm = TRUE),
+    ## (2) Ratio of (unweighted) sums -- West et al.'s (2025) own
+    ## method: sum M2 across the FG set, sum F across the same set,
+    ## then divide. Mathematically equal to mean(M2)/mean(F) for a
+    ## fixed FG count, so this also equals a ratio-of-unweighted-
+    ## means, NOT a mean-of-ratios (see header comment for why that
+    ## distinction matters).
+    M2F_ratio_of_sums = sum(M2, na.rm = TRUE) / sum(F_, na.rm = TRUE),
+    QY_ratio_of_sums   = sum(Q,  na.rm = TRUE) / sum(Y,  na.rm = TRUE)
+  ), by = .(Simulation, Model)]
+
+  setorder(averages, Simulation, Model)
+
+  cat(
+    "\n[", label, "] Fixed-composition FG average (", length(common_fgs),
+    " FGs), unweighted mean-of-ratios and ratio-of-sums:\n", sep = ""
+  )
+  print(averages)
+
+  fwrite(
+    averages,
+    file.path(output_dir, paste0(
+      "HarpSeal_FixedFG_Ratio_Averages_", label, ".csv"
+    ))
+  )
+
+  vs_average <- merge(
+    fixed_data[, .(
+      Simulation, Model, Group, M2_over_F, Q_over_Y, M2, F_, Q, Y
+    )],
+    averages,
+    by = c("Simulation", "Model")
+  )
+
+  vs_average[, M2F_vs_mean_of_ratios_unweighted_pct :=
+    100 * M2_over_F / M2F_mean_of_ratios_unweighted]
+  vs_average[, M2F_vs_ratio_of_sums_pct :=
+    100 * M2_over_F / M2F_ratio_of_sums]
+  vs_average[, QY_vs_mean_of_ratios_unweighted_pct :=
+    100 * Q_over_Y / QY_mean_of_ratios_unweighted]
+  vs_average[, QY_vs_ratio_of_sums_pct :=
+    100 * Q_over_Y / QY_ratio_of_sums]
+
+  setorder(vs_average, Simulation, Model, Group)
+
+  fwrite(
+    vs_average,
+    file.path(output_dir, paste0(
+      "HarpSeal_FixedFG_vs_GroupAverage_", label, ".csv"
+    ))
+  )
+
+  cat(
+    "\n[", label, "] Each FG's ratio as a % of the fixed-composition",
+    " group average, head:\n", sep = ""
+  )
+  print(head(vs_average, 20))
+
+  list(averages = averages, vs_average = vs_average, common_fgs = common_fgs)
+
+}
+
+## ---- Run for both FG sets ----
+## (a) West et al.'s (2025) own exact 8-species fish set -- the
+## closest same-method comparison to their published 17x/24x.
+west_fish_result <- compute_fixed_fg_average(
+  west_fish_species, "WestEtAl8FishSpecies", output_dir
+)
+
+## (b) This model's broader fish-only "exploited" set -- context
+## only, NOT a reproduction of West's number (see header comment).
+broad_fish_result <- compute_fixed_fg_average(
+  exploited_fish_species, "AllExploitedFishFGs", output_dir
+)
+
+#=========================================================
+# Published vs. simulated: West et al.'s (2025) own 8-species set,
+# their own "ratio of sums" method, against every Simulation/Model
+# this script has run.
+#=========================================================
+## Two ratios are computed per Simulation/Model, both restricted to
+## the LITERAL 8 species in `west_fish_species` (no exclusion of
+## species with zero F anywhere, unlike `compute_fixed_fg_average`'s
+## `common_fgs` logic -- this is the more literal reading of West et
+## al.'s (2025) "summed ... for shared fish prey" method, see header
+## comment above):
+##   - `M2F_pooled_simulated` / `QY_pooled_simulated`: sum(M2)/sum(F) and
+##     sum(Q)/sum(Y) across all 8 species, unweighted. As shown
+##     above, this is algebraically identical to mean(M2)/mean(F)
+##     for a fixed species count -- i.e. this already IS a ratio of
+##     (arithmetic) means, matching West et al.'s (2025) own stated
+##     method and the figure they published it against.
+## A biomass-weighted version of this comparison was attempted and
+## removed: `results` (the source of M2 and F here) never carried a
+## Biomass column, which only exists in the separate biomass_results/
+## biomass_baseline tables (read from a different EwE output file).
+## Per Andrea's instruction, this is NOT re-wired to join that in --
+## only the plain/unweighted ratio-of-sums is reported, which is also
+## the version that matches West et al.'s (2025) own published method
+## and figure exactly.
+## Published headline values (M2F_pooled_published / QY_pooled_published) are
+## hardcoded below from West et al. (2025) Section 3.2/Figs. 5-6 --
+## update these if a newer version of that paper is checked.
+west_published <- data.table(
+  Period = c("1985-1987", "2013-2015", "2018-2020"),
+  M2F_pooled_published = c(1.3, 14.1, 17.3),
+  QY_pooled_published  = c(1.7, NA_real_, 24.0)
+)
+
+compute_west_published_comparison <- function(output_dir){
+
+  if(!exists("m2f_raw") || !exists("qy_raw") || length(west_fish_species) == 0){
+    warning(
+      "compute_west_published_comparison: m2f_raw/qy_raw/",
+      "west_fish_species not available -- skipping."
+    )
+    return(NULL)
+  }
+
+  m2f_w <- m2f_raw[Group %in% west_fish_species]
+  qy_w  <- qy_raw[Group %in% west_fish_species]
+
+  missing_m2f <- m2f_w[, .(N = uniqueN(Group)), by = .(Simulation, Model)][
+    N < length(west_fish_species)
+  ]
+  if(nrow(missing_m2f) > 0){
+    warning(
+      "compute_west_published_comparison: the following Simulation/",
+      "Model combinations are missing one or more of the 8 ",
+      "west_fish_species in m2f_raw (sum computed over however many",
+      " ARE present, NOT padded or imputed) -- inspect before",
+      " trusting: ", paste(
+        paste(missing_m2f$Simulation, missing_m2f$Model, sep = "/"),
+        collapse = "; "
+      )
+    )
+  }
+
+  ## Biomass-weighted variants were dropped here (and from
+  ## compute_fixed_fg_average above): `results`, the source of M2 and
+  ## F in m2f_raw, never carried a Biomass column at all -- Biomass
+  ## only exists in the separate biomass_results/biomass_baseline
+  ## tables (read from a different file), and an earlier attempt to
+  ## pull it into m2f_raw directly from `results` crashed with
+  ## "object 'Biomass' not found". Rather than wiring in a second
+  ## join to fetch it from biomass_results, this now reports ONLY
+  ## the plain/unweighted ratio-of-sums -- which is also the version
+  ## that matches West et al.'s (2025) own published method exactly,
+  ## per Andrea's instruction.
+  ## Column names spell out explicitly that these are POOLED ratios
+  ## (summed across the 8-species fg_set, then divided), simulated
+  ## here vs. published by West et al. (2025) -- same quantity, same
+  ## method, so "pooled" means the same thing on both sides of the
+  ## table.
+  comparison <- merge(
+    m2f_w[, .(
+      N_M2F = uniqueN(Group),
+      M2F_pooled_simulated = sum(M2, na.rm = TRUE) / sum(F_, na.rm = TRUE)
+    ), by = .(Simulation, Model)],
+    qy_w[, .(
+      N_QY = uniqueN(Group),
+      QY_pooled_simulated = sum(Q, na.rm = TRUE) / sum(Y, na.rm = TRUE)
+    ), by = .(Simulation, Model)],
+    by = c("Simulation", "Model"), all = TRUE
+  )
+
+  ## Second M2/F (and Q/Y) column: same ratio-of-sums, but restricted
+  ## to `west_fish_species_nonzeroF` (drops Arctic cod and, outside
+  ## 1985-1987, Sandlance -- see that vector's definition above for
+  ## why). This is the version that actually lines up with West et
+  ## al.'s (2025) published M2/F; the full-8-species column above is
+  ## kept as the literal same-set comparison, not because it's the
+  ## better number. The Q/Y version is reported for completeness (and
+  ## for the combined M2/F + Q/Y verification figure), but it only
+  ## narrows the Q/Y gap -- it does NOT close it, because the Q/Y gap
+  ## has a second, independent cause (Ecopath-implied vs. reconstructed
+  ## consumption, see HarpSeal_EcopathImplied_vs_Reconstructed_
+  ## Consumption_AllSpecies.csv) that this species restriction does not
+  ## fix.
+  m2f_6 <- m2f_raw[Group %in% west_fish_species_nonzeroF]
+  comparison_6sp <- m2f_6[, .(
+    N_M2F_6species = uniqueN(Group),
+    M2F_pooled_simulated_6species =
+      sum(M2, na.rm = TRUE) / sum(F_, na.rm = TRUE)
+  ), by = .(Simulation, Model)]
+  qy_6 <- qy_raw[Group %in% west_fish_species_nonzeroF]
+  comparison_6sp_qy <- qy_6[, .(
+    N_QY_6species = uniqueN(Group),
+    QY_pooled_simulated_6species =
+      sum(Q, na.rm = TRUE) / sum(Y, na.rm = TRUE)
+  ), by = .(Simulation, Model)]
+  comparison <- merge(
+    comparison, comparison_6sp, by = c("Simulation", "Model"), all.x = TRUE
+  )
+  comparison <- merge(
+    comparison, comparison_6sp_qy, by = c("Simulation", "Model"), all.x = TRUE
+  )
+
+  ## Match each Simulation to a published period by substring, since
+  ## Simulation values carry period-specific suffixes (e.g.
+  ## "2018-2020_5050", "2018-2020_8020") that don't exactly equal the
+  ## Period strings in `west_published`.
+  comparison[, Period := fcase(
+    grepl("1985", Simulation), "1985-1987",
+    grepl("2013", Simulation), "2013-2015",
+    grepl("2018", Simulation), "2018-2020",
+    default = NA_character_
+  )]
+  if(anyNA(comparison$Period)){
+    warning(
+      "compute_west_published_comparison: could not match a ",
+      "published period for Simulation value(s): ", paste(
+        unique(comparison[is.na(Period)]$Simulation), collapse = ", "
+      ), " -- these rows will have no Published column to compare",
+      " against."
+    )
+  }
+
+  comparison <- merge(comparison, west_published, by = "Period", all.x = TRUE)
+  setorder(comparison, Period, Simulation, Model)
+  setcolorder(comparison, c(
+    "Period", "Simulation", "Model", "N_M2F", "N_QY",
+    "M2F_pooled_simulated", "M2F_pooled_simulated_6species",
+    "M2F_pooled_published",
+    "QY_pooled_simulated", "QY_pooled_simulated_6species",
+    "QY_pooled_published"
+  ))
+
+  cat(
+    "\nPooled ratio, published (West et al., 2025) vs. simulated (this",
+    " report, same 8 exploited fish species and same ratio-of-sums",
+    " method), every Simulation/Model combination:\n", sep = ""
+  )
+  print(comparison)
+
+  fwrite(
+    comparison,
+    file.path(output_dir, "HarpSeal_PooledRatio_Published_vs_Simulated_AllModels.csv")
+  )
+
+  comparison
+
+}
+
+## Explicit, standalone table: pooled M2/F and Q/Y ratio -- summed
+## across West et al.'s (2025) own 8 exploited fish prey species,
+## same ratio-of-sums method they used -- for EVERY Simulation/Model
+## this script has run, side by side with West et al.'s (2025)
+## published pooled ratio for that period. Written to
+## HarpSeal_PooledRatio_Published_vs_Simulated_AllModels.csv.
+west_published_comparison <- compute_west_published_comparison(output_dir)
+
+#=========================================================
+# Figure: WHY the pooled M2/F and Q/Y ratios differ from West et
+# al.'s (2025) published figures -- verifying both the species
+# grouping ("assumed shared species", Section 2.5) and the pooling
+# method (ratio-of-sums vs. mean-of-ratios) in one figure, for BOTH
+# ratios.
+#=========================================================
+## Arctic cod (every period) and Sandlance (outside 1985-1987) have
+## F == 0 in this model, but nonzero M2 -- a plain sum-of-M2-over-
+## sum-of-F across all 8 named species credits their M2 to the
+## numerator while they add nothing to F, inflating the pooled ratio
+## for free (see west_fish_species_nonzeroF's definition above).
+## west_fish_species_nonzeroF is the "assumed shared species" set
+## described in Section 2.5 of the report: the FGs with nonzero F
+## AND nonzero M2 in every baseline EwE model. This figure crosses
+## that grouping choice with the pooling method (ratio-of-sums, as
+## West et al. 2025 Section 3.2 describe, vs. an unweighted mean of
+## each species' own ratio) to verify both at once, for M2/F and for
+## Q/Y: the literal 8-species sum (too high), the assumed-shared-
+## species sum (closely matches published for M2/F; narrows but does
+## not close the gap for Q/Y, which has a second, independent cause --
+## see the companion Cause 2 figure), and the mean-of-ratios under
+## each of those two groupings (far more volatile than, and less
+## consistent with, the published value than the corresponding sum
+## is) -- alongside West et al.'s (2025) own published values. The 8
+## named species (west_fish_species) are American plaice (>35 cm),
+## Arctic cod, Atlantic cod (>35 cm), capelin, Greenland halibut,
+## Atlantic herring, redfish, and sand lance (West et al. 2025, Figs.
+## 5-6); the assumed shared species (west_fish_species_nonzeroF) are
+## that list minus Arctic cod and Sandlance.
+if(exists("west_published_comparison") && !is.null(west_published_comparison)){
+
+  cause1_data <- west_published_comparison[
+    Model == "baseline" & !is.na(M2F_pooled_simulated_6species)
+  ]
+
+  if(nrow(cause1_data) > 0){
+
+    cause1_data[, Simulation := factor(
+      Simulation,
+      levels = c("1985-1987", "2013-2015", "2018-2020_5050", "2018-2020_8020")
+    )]
+
+    ## ---- Ratio-of-sums vs. mean-of-individual-ratios, crossed with
+    ## the species grouping (literal 8-species vs. assumed shared
+    ## species), for BOTH M2/F and Q/Y. Computed first so both the
+    ## figure and the CSV below draw from the same table. A species
+    ## with a near-zero F (or Y) denominator (e.g. Sandlance) has an
+    ## individual ratio that can run into the hundreds, and an
+    ## unweighted mean gives that species the same weight as every
+    ## other species regardless of how small its own contribution to
+    ## the pooled sums is -- the opposite of how the ratio-of-sums
+    ## method behaves.
+    ratio_of_sums_vs_mean <- rbindlist(lapply(
+      as.character(unique(cause1_data$Simulation)),
+      function(sim){
+        rbindlist(list(
+          data.table(
+            Simulation = sim, Ratio = "M2/F", SpeciesSet = "8 species (literal)",
+            RatioOfSums = cause1_data[Simulation == sim, M2F_pooled_simulated],
+            MeanOfRatios = m2f_raw[
+              Model == "baseline" & Simulation == sim &
+                Group %in% west_fish_species & F_ > 0,
+              mean(M2 / F_, na.rm = TRUE)
+            ]
+          ),
+          data.table(
+            Simulation = sim, Ratio = "M2/F", SpeciesSet = "Assumed shared species",
+            RatioOfSums = cause1_data[
+              Simulation == sim, M2F_pooled_simulated_6species
+            ],
+            MeanOfRatios = m2f_raw[
+              Model == "baseline" & Simulation == sim &
+                Group %in% west_fish_species_nonzeroF & F_ > 0,
+              mean(M2 / F_, na.rm = TRUE)
+            ]
+          ),
+          data.table(
+            Simulation = sim, Ratio = "Q/Y", SpeciesSet = "8 species (literal)",
+            RatioOfSums = cause1_data[Simulation == sim, QY_pooled_simulated],
+            MeanOfRatios = qy_raw[
+              Model == "baseline" & Simulation == sim &
+                Group %in% west_fish_species & Y > 0,
+              mean(Q / Y, na.rm = TRUE)
+            ]
+          ),
+          data.table(
+            Simulation = sim, Ratio = "Q/Y", SpeciesSet = "Assumed shared species",
+            RatioOfSums = cause1_data[
+              Simulation == sim, QY_pooled_simulated_6species
+            ],
+            MeanOfRatios = qy_raw[
+              Model == "baseline" & Simulation == sim &
+                Group %in% west_fish_species_nonzeroF & Y > 0,
+              mean(Q / Y, na.rm = TRUE)
+            ]
+          )
+        ))
+      }
+    ))
+    ratio_of_sums_vs_mean <- merge(
+      ratio_of_sums_vs_mean,
+      cause1_data[, .(
+        Simulation = as.character(Simulation),
+        M2F_Published = M2F_pooled_published,
+        QY_Published = QY_pooled_published
+      )],
+      by = "Simulation", all.x = TRUE
+    )
+    ratio_of_sums_vs_mean[, Published := fifelse(
+      Ratio == "M2/F", M2F_Published, QY_Published
+    )]
+    ratio_of_sums_vs_mean[, c("M2F_Published", "QY_Published") := NULL]
+    ratio_of_sums_vs_mean[, Simulation := factor(
+      Simulation, levels = levels(cause1_data$Simulation)
+    )]
+    setorder(ratio_of_sums_vs_mean, Ratio, Simulation, SpeciesSet)
+    cat("\nRatio-of-sums vs. mean-of-individual-ratios (baseline models,",
+        "M2/F and Q/Y):\n")
+    print(ratio_of_sums_vs_mean)
+    fwrite(
+      ratio_of_sums_vs_mean,
+      file.path(output_dir, "HarpSeal_PooledRatio_SumVsMeanOfRatios_Comparison.csv")
+    )
+    cat(
+      "\nThis confirms West et al.'s (2025) published values are",
+      "consistent with a ratio-of-sums (as their own Section 3.2 text",
+      "states), not with an unweighted mean of each species' own ratio:",
+      "the mean-of-ratios is far more volatile and, in almost every",
+      "period/ratio checked here, further from the published value than",
+      "the ratio-of-sums is -- most strikingly for the literal 8-species",
+      "M2/F set in 1985-1987, where Sandlance's individual ratio (driven",
+      "by its near-zero F) alone inflates the unweighted mean to roughly",
+      "two orders of magnitude above both the ratio-of-sums and the",
+      "published figure. For Q/Y, restricting to the assumed shared",
+      "species narrows but does not close the gap to published --",
+      "confirming this species restriction is NOT, by itself, the fix",
+      "for Q/Y (see the companion Cause 2 figure for that cause).\n"
+    )
+
+    ## ---- Build the combined figure: 4 simulated bars (2 groupings x
+    ## 2 methods) plus the published value, per baseline period, for
+    ## BOTH ratios (2 rows).
+    cause1_long <- rbindlist(list(
+      cause1_data[, .(
+        Simulation, Ratio = "M2/F",
+        Series = "8 species, ratio of sums",
+        Value = M2F_pooled_simulated
+      )],
+      ratio_of_sums_vs_mean[Ratio == "M2/F" & SpeciesSet == "8 species (literal)", .(
+        Simulation, Ratio, Series = "8 species, mean of ratios", Value = MeanOfRatios
+      )],
+      cause1_data[, .(
+        Simulation, Ratio = "M2/F",
+        Series = "Assumed shared species, ratio of sums",
+        Value = M2F_pooled_simulated_6species
+      )],
+      ratio_of_sums_vs_mean[Ratio == "M2/F" & SpeciesSet == "Assumed shared species", .(
+        Simulation, Ratio, Series = "Assumed shared species, mean of ratios", Value = MeanOfRatios
+      )],
+      cause1_data[, .(
+        Simulation, Ratio = "M2/F",
+        Series = "Published (West et al., 2025)",
+        Value = M2F_pooled_published
+      )],
+      cause1_data[, .(
+        Simulation, Ratio = "Q/Y",
+        Series = "8 species, ratio of sums",
+        Value = QY_pooled_simulated
+      )],
+      ratio_of_sums_vs_mean[Ratio == "Q/Y" & SpeciesSet == "8 species (literal)", .(
+        Simulation, Ratio, Series = "8 species, mean of ratios", Value = MeanOfRatios
+      )],
+      cause1_data[, .(
+        Simulation, Ratio = "Q/Y",
+        Series = "Assumed shared species, ratio of sums",
+        Value = QY_pooled_simulated_6species
+      )],
+      ratio_of_sums_vs_mean[Ratio == "Q/Y" & SpeciesSet == "Assumed shared species", .(
+        Simulation, Ratio, Series = "Assumed shared species, mean of ratios", Value = MeanOfRatios
+      )],
+      cause1_data[, .(
+        Simulation, Ratio = "Q/Y",
+        Series = "Published (West et al., 2025)",
+        Value = QY_pooled_published
+      )]
+    ), use.names = TRUE)
+    ## Drop rows with no value at all (e.g. QY_pooled_published is NA
+    ## for 2013-2015 -- West et al. 2025 did not publish a Q/Y figure
+    ## for that period) rather than plotting an empty bar.
+    cause1_long <- cause1_long[!is.na(Value) & is.finite(Value) & Value > 0]
+
+    series_levels <- c(
+      "8 species, ratio of sums",
+      "8 species, mean of ratios",
+      "Assumed shared species, ratio of sums",
+      "Assumed shared species, mean of ratios",
+      "Published (West et al., 2025)"
+    )
+    cause1_long[, Series := factor(Series, levels = series_levels)]
+    cause1_long[, Simulation := factor(
+      Simulation, levels = levels(cause1_data$Simulation)
+    )]
+    cause1_long[, Ratio := factor(Ratio, levels = c("M2/F", "Q/Y"))]
+
+    ## ---- Mechanism annotation: show WHY removing these two species
+    ## moves the bar, not just that it does. Per baseline period, the
+    ## combined numerator and denominator that Arctic cod + Sandlance
+    ## contribute to each 8-species sum -- numerator nonzero,
+    ## denominator effectively zero -- is exactly the "free" inflation
+    ## this figure demonstrates, for both M2/F and Q/Y. Computed
+    ## directly from m2f_raw/qy_raw (not hardcoded), so this stays
+    ## correct if the model is ever rerun with different values.
+    dropped_species <- c("Arctic cod", "Sandlance")
+    cause1_dropped_m2f <- m2f_raw[
+      Model == "baseline" & Group %in% dropped_species &
+        Simulation %in% as.character(unique(cause1_data$Simulation)),
+      .(
+        Ratio = "M2/F",
+        Label = sprintf(
+          "Arctic cod + Sandlance add:\nΣM2 = %.2f, ΣF ≈ %s",
+          sum(M2, na.rm = TRUE),
+          ifelse(sum(F_, na.rm = TRUE) < 0.001, "0", sprintf("%.4f", sum(F_, na.rm = TRUE)))
+        )
+      ),
+      by = Simulation
+    ]
+    cause1_dropped_qy <- qy_raw[
+      Model == "baseline" & Group %in% dropped_species &
+        Simulation %in% as.character(unique(cause1_data$Simulation)),
+      .(
+        Ratio = "Q/Y",
+        Label = sprintf(
+          "Arctic cod + Sandlance add:\nΣQ = %.2f, ΣY ≈ %s",
+          sum(Q, na.rm = TRUE),
+          ifelse(sum(Y, na.rm = TRUE) < 0.001, "0", sprintf("%.4f", sum(Y, na.rm = TRUE)))
+        )
+      ),
+      by = Simulation
+    ]
+    cause1_dropped <- rbindlist(list(cause1_dropped_m2f, cause1_dropped_qy))
+    cause1_dropped[, Simulation := factor(
+      Simulation, levels = levels(cause1_long$Simulation)
+    )]
+    cause1_dropped[, Ratio := factor(Ratio, levels = levels(cause1_long$Ratio))]
+    setorder(cause1_dropped, Ratio, Simulation)
+
+    ## NOTE: the Arctic cod + Sandlance "ΣM2/ΣF" (and "ΣQ/ΣY") mechanism
+    ## numbers in `cause1_dropped` are NOT drawn on the plot itself
+    ## (per Andrea's instruction, the in-plot annotation was too
+    ## cluttered) -- they're reported in cause1_caption below instead,
+    ## for use as the figure's caption text in the report.
+    p_cause1 <- ggplot(
+      cause1_long,
+      aes(x = Simulation, y = Value, color = Series, group = Series)
+    ) +
+      geom_line(linewidth = 0.9) +
+      geom_point(size = 2.4) +
+      geom_text(
+        aes(label = sprintf("%.1f", Value)),
+        vjust = -0.9, size = 2.6, show.legend = FALSE
+      ) +
+      facet_wrap(~Ratio, scales = "free_y", nrow = 2) +
+      scale_y_log10() +
+      scale_color_manual(values = c(
+        "8 species, ratio of sums" = "#D55E00",
+        "8 species, mean of ratios" = "#E69F00",
+        "Assumed shared species, ratio of sums" = "#0072B2",
+        "Assumed shared species, mean of ratios" = "#56B4E9",
+        "Published (West et al., 2025)" = "#009E73"
+      )) +
+      labs(
+        title = paste(
+          "Verifying the species grouping and the pooling method behind",
+          "the M2/F and Q/Y gaps"
+        ),
+        subtitle = paste0(
+          "Two factors, crossed, for both ratios: which species are ",
+          "assumed “shared” (all 8 named species -- American ",
+          "plaice, Arctic cod, Atlantic cod, capelin, Greenland halibut, ",
+          "herring, redfish, sand lance -- vs. the 6 with nonzero F and M2 ",
+          "in every baseline model, Section 2.5) and how their ratios are ",
+          "pooled (ratio of sums, as West et al. 2025 describe, vs. an ",
+          "unweighted mean of each species' own ratio). The assumed-",
+          "shared-species, ratio-of-sums line closely tracks published M2/F ",
+          "in every period, but only narrows the Q/Y gap (top row vs. ",
+          "bottom row); mean-of-ratios lines are far more volatile under ",
+          "either grouping and either ratio. Y-axis is log-scaled because ",
+          "of the range across series (note the extreme 1985-1987 8-species ",
+          "M2/F mean, driven by Sandlance's near-zero F); no published Q/Y ",
+          "value exists for 2013-2015."
+        ),
+        x = "Baseline period", y = "Pooled ratio (log scale)", color = NULL
+      ) +
+      common_theme +
+      theme(
+        axis.text.x = element_text(angle = 30, hjust = 1),
+        plot.subtitle = element_text(size = 8),
+        legend.text = element_text(size = 9)
+      )
+
+    cause1_caption <- paste(
+      "Figure: verifying both the species grouping and the pooling method",
+      "behind the gap between this report's pooled M2/F and Q/Y ratios and",
+      "West et al.'s (2025) published figures. The 8 named species are",
+      "American plaice (>35 cm), Arctic cod, Atlantic cod (>35 cm), capelin,",
+      "Greenland halibut, Atlantic herring, redfish, and sand lance (West et",
+      "al. 2025, Figs. 5-6); the assumed shared species are that list minus",
+      "Arctic cod and Sandlance (Section 2.5). Arctic cod has F = 0 in every",
+      "period in this EwE reproduction, and Sandlance has F = 0 outside",
+      "1985-1987 -- both still have nonzero M2 and nonzero diet-based",
+      "consumption (the harp seal does eat them), so summing M2 (or Q) and",
+      "F (or Y) across the literal 8-species set credits their numerator to",
+      "the pooled ratio while they add nothing to the denominator,",
+      "inflating it. The combined M2/F and Q/Y these two species add to the",
+      "8-species sum, per baseline period (the mechanism in the model's own",
+      "numbers), is given below the plot. Restricting the",
+      "same sum to the assumed shared species brings this report's pooled",
+      "M2/F into close agreement with West et al.'s (2025) published value",
+      "in every baseline model (top row), but only narrows -- does not",
+      "close -- the corresponding Q/Y gap (bottom row), because Q/Y has a",
+      "second, independent cause (see the companion Cause 2 figure).",
+      "Separately, taking an unweighted mean of each species' own ratio",
+      "instead of summing -- under either species grouping, for either",
+      "ratio -- is far more volatile and far less consistent with the",
+      "published value, confirming West et al.'s (2025) published values",
+      "are consistent only with their stated sum-then-divide method",
+      "(Section 3.2), not with an average of individual species ratios."
+    )
+    cat("\n", cause1_caption, "\n", sep = "")
+    cat(
+      "\nArctic cod + Sandlance's combined contribution to the 8-species",
+      "sum, by period and ratio (for the figure caption, since this is no",
+      "longer annotated directly on the plot):\n"
+    )
+    print(cause1_dropped[, .(Ratio, Simulation, Label)])
+
+    ggsave(
+      file.path(output_dir, "HarpSeal_WestGap_Cause1_SpeciesSetEffect.png"),
+      p_cause1,
+      width = 15, height = 10, dpi = 300
+    )
+
+  } else {
+    cat(
+      "\nSkipping Cause 1 figure -- no baseline Simulation/Model has a",
+      " valid M2F_pooled_simulated_6species value.\n"
+    )
+  }
+
+} else {
+  cat("\nSkipping Cause 1 figure -- west_published_comparison not available.\n")
 }
 
 #=========================================================
@@ -4243,14 +5472,108 @@ if(exists("results") && exists("qy_results") && exists("biomass_results")){
       "M2/F-vs-Q/Y numbers. High CV_Ratio = the gap is species-specific in that",
       "Simulation/Model.)\n")
   print(consumption_check_summary)
-  
+
+  #=========================================================
+  # Figure: WHY the pooled Q/Y ratio differs from West et al.'s
+  # (2025) published figure -- Cause 2, the Implied-vs-Reconstructed
+  # consumption gap.
+  #=========================================================
+  ## Restricting to the 6 nonzero-F species (Cause 1, figure above)
+  ## resolves almost all of the M2/F gap, but Q/Y stays ~2-4x too
+  ## high even after that fix. Algebraically, (M2/F)/(Q/Y) reduces to
+  ## EcopathImpliedConsumption / ReconstructedConsumption (the ratio
+  ## plotted here) -- so a value well below 1 for this ratio, shared
+  ## across species within a period, is exactly what inflates Q/Y
+  ## relative to M2/F: `Q_species` (the diet-fraction-based
+  ## reconstruction feeding Q/Y) runs systematically higher than what
+  ## this model's own mass-balanced M2 implies the seal actually
+  ## consumed.
+  cause2_data <- consumption_check[
+    Model == "baseline" & Group %in% west_fish_species &
+      is.finite(ImpliedOverReconstructed) & ImpliedOverReconstructed > 0
+  ]
+
+  if(nrow(cause2_data) > 0){
+
+    cause2_data[, Simulation := factor(
+      Simulation,
+      levels = c("1985-1987", "2013-2015", "2018-2020_N50", "2018-2020_N80",
+                 "2018-2020_S20", "2018-2020_S50", "2018-2020_5050",
+                 "2018-2020_8020")
+    )]
+
+    p_cause2 <- ggplot(
+      cause2_data,
+      aes(x = Group, y = ImpliedOverReconstructed)
+    ) +
+      geom_col(fill = "#CC79A7", width = 0.65) +
+      geom_hline(yintercept = 1, linetype = 2, colour = "grey30") +
+      geom_text(
+        aes(label = sprintf("%.2f", ImpliedOverReconstructed)),
+        vjust = -0.4, size = 2.8
+      ) +
+      facet_wrap(~Simulation, scales = "free_x") +
+      coord_cartesian(ylim = c(0, 1.05)) +
+      labs(
+        title = paste(
+          "Cause 2 of the Q/Y gap: reconstructed seal consumption runs",
+          "higher than this model's own Ecopath-implied consumption"
+        ),
+        subtitle = paste0(
+          "EcopathImpliedConsumption (Predator_M2 × prey Biomass) ÷ ",
+          "ReconstructedConsumption (diet fraction × seal Q/B × seal ",
+          "Biomass = Q_species). A value near 1 means the two agree; well ",
+          "below 1 (dashed line) means Q_species, which feeds Q/Y, is ",
+          "inflated relative to what this model's own M2 implies -- and ",
+          "unlike Cause 1, this is NOT fixed by restricting the species set."
+        ),
+        x = NULL, y = "Ecopath-implied ÷ reconstructed consumption"
+      ) +
+      common_theme +
+      theme(
+        axis.text.x = element_text(angle = 40, hjust = 1, size = 8),
+        plot.subtitle = element_text(size = 8.5)
+      )
+
+    cause2_caption <- paste(
+      "Figure: cause 2 of the gap between this report's pooled Q/Y ratio and",
+      "West et al.'s (2025) published figure -- separate from, and in",
+      "addition to, Cause 1 above. Algebraically, (M2/F)/(Q/Y) for any one",
+      "species reduces to EcopathImpliedConsumption/ReconstructedConsumption",
+      "(Predator_M2 x Biomass, divided by the diet-fraction-based Q_species",
+      "this script reconstructs for the seal). In 1985-1987 and 2013-2015",
+      "this ratio sits at a strikingly consistent ~0.40 across all 8 named",
+      "species (CV < 0.2% -- see HarpSeal_EcopathImplied_vs_Reconstructed_",
+      "Consumption_Summary.csv), meaning Q_species runs about 2.5x higher",
+      "than what this model's own mass-balanced predation mortality implies",
+      "the seal actually consumed -- a single shared offset, not a",
+      "species-specific error. This is exactly the magnitude of the residual",
+      "Q/Y gap left after Cause 1's species-set fix (M2/F) is applied, and it",
+      "is NOT resolved by restricting to the 6 nonzero-F species: Cause 1 and",
+      "Cause 2 are independent problems with independent fixes."
+    )
+    cat("\n", cause2_caption, "\n", sep = "")
+
+    ggsave(
+      file.path(output_dir, "HarpSeal_WestGap_Cause2_ImpliedVsReconstructed.png"),
+      p_cause2,
+      width = 13, height = 7, dpi = 300
+    )
+
+  } else {
+    cat(
+      "\nSkipping Cause 2 figure -- no baseline row for the 8 west_fish_",
+      "species has a valid, positive ImpliedOverReconstructed value.\n"
+    )
+  }
+
 } else {
-  
+
   cat(
     "\nSkipping all-species Ecopath-implied-vs-reconstructed-consumption check --",
     "results/qy_results/biomass_results not all available.\n"
   )
-  
+
 }
 
 #=========================================================
@@ -5135,7 +6458,27 @@ fwrite(
 # )
 ###### NCAM
 
-load("C:/Users/danie/Desktop/HarpSeals/NCAM/ncam_2019.RData")   # object is named ncam_2019
+## CORRECTED 2026-11-09: same issue as root_dir above -- this was
+## still the leftover Windows-style placeholder path. Confirmed
+## location on this machine (the Mac): /Users/daniel/Downloads/
+## outputs/ncam_2019.RData.
+ncam_file <- "/Users/daniel/Downloads/outputs/ncam_2019.RData"
+
+if(!file.exists(ncam_file)){
+  log_msg("ncam_file does not exist -- diagnosing which component is wrong:")
+  diagnose_path(dirname(ncam_file))
+  stop(
+    "ncam_file does not exist on this machine: '", ncam_file, "'. ",
+    "Edit ncam_file just above this check to point at your actual ",
+    "ncam_2019.RData on THIS machine -- see the component-by-component",
+    " check just above (and in ", .log_file, ") for exactly which part",
+    " of the path is wrong."
+  )
+}
+
+log_msg("ncam_file = ", ncam_file, " (OK)")
+
+load(ncam_file)   # object is named ncam_2019
 
 fit <- ncam_2019          # (this is what the dashboard code calls the object internally)
 
@@ -7105,7 +8448,7 @@ scale_shape_manual(
     "M2/F = 17 (2018-2020)"   = 8,
     "Q/Y = 24 (2018-2020)"    = 8
   ),
-  name = "Published in West et al. (2025)"
+  name = "Published in West et al. (2025) — pooled, 8 exploited fish species"
 ) +
   
   #-------------------------------------------------------
@@ -7257,7 +8600,11 @@ pfig1_caption <- paste(
   "simulation, so the band collapses onto the line there. Asterisks",
   "show the published estimates reported by West et al. (2025):",
   "M2/F = 1.3 and Q/Y = 1.7 for 1985-1987, and M2/F = 17 and Q/Y = 24",
-  "for 2018-2020."
+  "for 2018-2020. These are West et al.'s (2025) single pooled",
+  "estimates, averaged across multiple species and repeated",
+  "identically across panels as a common reference point; they are",
+  "not per-FG published values and are not directly comparable to",
+  "any individual FG's own estimate shown here."
 )
 
 cat("\n", pfig1_caption, "\n", sep = "")
@@ -8206,9 +9553,15 @@ if(nrow(inconsistency_data) == 0){
   # Custom legend key
   # Vertical line
   #---------------------------------------------------------
-  
+  ## CHANGED: lwd was 1 * .pt, thinner than the actual "Published"
+  ## marker drawn on the bars (geom_segment below uses
+  ## linewidth = 1.2), so the legend's tick looked noticeably
+  ## thinner than the tick marks in the plot itself. Matched to
+  ## 1.2 * .pt here so the legend glyph is the same weight as what's
+  ## actually drawn on the bars.
+
   draw_key_vertical_line <- function(data, params, size) {
-    
+
     grid::segmentsGrob(
       x0 = 0.5,
       x1 = 0.5,
@@ -8216,11 +9569,11 @@ if(nrow(inconsistency_data) == 0){
       y1 = 0.90,
       gp = grid::gpar(
         col = "black",
-        lwd = 1 * .pt
+        lwd = 1.2 * .pt
       )
     )
   }
-  
+
   #---------------------------------------------------------
   # Custom legend key / marker glyph
   # Plain asterisk, matched exactly between plot and legend
@@ -8255,16 +9608,16 @@ if(nrow(inconsistency_data) == 0){
     )
   }
   #---------------------------------------------------------
-  
+
   #---------------------------------------------------------
   # Label position
   #---------------------------------------------------------
-  
+
   inconsistency_data[
     ,
     LabelPos := 0.58
   ]
-  
+
   #---------------------------------------------------------
   # Dummy data for legend
   #---------------------------------------------------------
@@ -8279,24 +9632,24 @@ if(nrow(inconsistency_data) == 0){
   ## fixed level order ("EwE values" first, "Diet item..." second),
   ## matching scale_shape_manual's values= and override.aes vectors
   ## below exactly -- removes any dependence on alphabetical sorting.
-  
+
   shape_legend_levels <- c(
     "EwE models",
     "Diet item shared by multiple FGs"
   )
-  
+
   legend_bar <- data.table(
     Group = inconsistency_data$Group[1],
     DietFraction = 0,
     Legend = factor("EwE models", levels = shape_legend_levels)
   )
-  
+
   legend_published <- data.table(
     Group = inconsistency_data$Group[1],
     y = 0,
-    Legend = "Published in West et al. (2025)"
+    Legend = "Published in West et al. (2025) — pooled, 8 exploited fish species"
   )
-  
+
   ## Third legend entry, for the split-prey asterisk marks (see
   ## split_group_marks above) -- explains what the "*" next to some
   ## bars' published vertical line marker means. Uses the custom
@@ -8309,7 +9662,7 @@ if(nrow(inconsistency_data) == 0){
   ## scale_shape_manual below only so this level still has a value on
   ## the shared shape scale; key_glyph overrides how it's actually
   ## drawn, so that shape's own appearance is never shown.
-  
+
   legend_asterisk <- data.table(
     Group = inconsistency_data$Group[1],
     y = 0,
@@ -8559,7 +9912,7 @@ if(nrow(inconsistency_data) == 0){
   scale_linetype_manual(
     name = NULL,
     values = c(
-      "Published in West et al. (2025)" = "solid"
+      "Published in West et al. (2025) — pooled, 8 exploited fish species" = "solid"
     ),
     guide = guide_legend(
       order = 2,
@@ -9070,7 +10423,7 @@ if(exists("ratio_compare") && nrow(ratio_compare) > 0){
       "M2/F = 17 (2018-2020)" = 8,
       "Q/Y = 24 (2018-2020)" = 8
     ),
-    name = "Published in West et al. (2025)"
+    name = "Published in West et al. (2025) — pooled, 8 exploited fish species"
   ) +
     
     #=======================================================
@@ -9281,7 +10634,11 @@ if(exists("ratio_compare") && nrow(ratio_compare) > 0){
     "where only one simulation exists per period, the band",
     "collapses onto the line. Asterisks represent published",
     "estimates in West et al. (2025): M2/F = 1.3 and Q/Y = 1.7",
-    "for 1985-1987, and M2/F = 17 and Q/Y = 24 for 2018-2020."
+    "for 1985-1987, and M2/F = 17 and Q/Y = 24 for 2018-2020. These",
+    "are West et al.'s (2025) single pooled, multi-species headline",
+    "estimates, not cod-specific published values; see the report's",
+    "Conclusions for why they are not directly comparable to the",
+    "Cod adult trajectory alone."
   )
   
   cat(
@@ -9422,7 +10779,7 @@ if(exists("ratio_compare") && nrow(ratio_compare) > 0){
         "M2/F = 17 (2018-2020)" = 8,
         "Q/Y = 24 (2018-2020)" = 8
       ),
-      name = "Published in West et al. (2025)"
+      name = "Published in West et al. (2025) — pooled, 8 exploited fish species"
     ) +
     
     scale_x_continuous(
@@ -9583,7 +10940,7 @@ if(exists("ratio_compare") && nrow(ratio_compare) > 0){
     height = 8,
     dpi = 300
   )
-  
+
   #---------------------------------------------------------
   # Second version, without West et al.'s (2025) published
   # Cod-adult headline markers (per review feedback: those markers
@@ -9596,7 +10953,7 @@ if(exists("ratio_compare") && nrow(ratio_compare) > 0){
   #---------------------------------------------------------
   p_d3fig1_ratio_noref <- p_d3fig1_ratio
   p_d3fig1_ratio_noref$layers[[length(p_d3fig1_ratio_noref$layers)]] <- NULL
-  
+
   ggsave(
     file.path(
       output_dir,
@@ -10183,7 +11540,7 @@ scale_shape_manual(
     "M2/F = 1.3 (1985-1987)" = 8,
     "M2/F = 17 (2018-2020)" = 8
   ),
-  name = "Published in West et al. (2025)"
+  name = "Published in West et al. (2025) — pooled, 8 exploited fish species"
 ) +
   
   #=======================================================
@@ -10446,7 +11803,7 @@ scale_shape_manual(
     "Q/Y = 1.7 (1985-1987)" = 8,
     "Q/Y = 24 (2018-2020)" = 8
   ),
-  name = "Published in West et al. (2025)"
+  name = "Published in West et al. (2025) — pooled, 8 exploited fish species"
 ) +
   
   #=======================================================
@@ -10639,10 +11996,12 @@ p_m2f_caption <- paste(
   "scenarios (50/50 and 80/20); at 1985-1987 and 2013-2015,",
   "where only one simulation exists per period, the band",
   "collapses onto the line. Asterisks show West et al.'s (2025)",
-  "published Cod adult headline ratios, repeated identically in",
-  "every panel as a common reference point, not as a claim that",
-  "each FG has its own published estimate; West et al. did not",
-  "report per-FG values. Where the underlying EwE model",
+  "published headline ratio, a single pooled estimate averaged",
+  "across multiple species (not a cod-specific or per-FG value),",
+  "repeated identically in every panel as a common reference",
+  "point; West et al. did not report per-FG values, and this",
+  "group average is not weighted by each species' biomass, catch,",
+  "or ecological importance. Where the underlying EwE model",
   "parameterized predation (M2) or fishing mortality (F) as",
   "zero for that group and simulation, the ratio is zero and",
   "the point sits at the bottom of the axis rather than being",
@@ -10671,10 +12030,12 @@ p_qy_caption <- paste(
   "scenarios (50/50 and 80/20); at 1985-1987 and 2013-2015,",
   "where only one simulation exists per period, the band",
   "collapses onto the line. Asterisks show West et al.'s (2025)",
-  "published Cod adult headline ratios, repeated identically in",
-  "every panel as a common reference point, not as a claim that",
-  "each FG has its own published estimate; West et al. did not",
-  "report per-FG values. Where the underlying EwE model",
+  "published headline ratio, a single pooled estimate averaged",
+  "across multiple species (not a cod-specific or per-FG value),",
+  "repeated identically in every panel as a common reference",
+  "point; West et al. did not report per-FG values, and this",
+  "group average is not weighted by each species' biomass, catch,",
+  "or ecological importance. Where the underlying EwE model",
   "parameterized consumption (Q) or yield (Y) as zero for",
   "that group and simulation, the ratio is zero and the point",
   "sits at the bottom of the axis rather than being dropped,",
@@ -10797,7 +12158,7 @@ p_m2f_ratio <- ggplot(
       "M2/F = 1.3 (1985-1987)" = 8,
       "M2/F = 17 (2018-2020)" = 8
     ),
-    name = "Published in West et al. (2025)"
+    name = "Published in West et al. (2025) — pooled, 8 exploited fish species"
   ) +
   
   scale_x_continuous(
@@ -10984,7 +12345,7 @@ p_qy_ratio <- ggplot(
       "Q/Y = 1.7 (1985-1987)" = 8,
       "Q/Y = 24 (2018-2020)" = 8
     ),
-    name = "Published in West et al. (2025)"
+    name = "Published in West et al. (2025) — pooled, 8 exploited fish species"
   ) +
   
   scale_x_continuous(
