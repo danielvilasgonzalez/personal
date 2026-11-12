@@ -395,6 +395,23 @@ model_order_baseline_first <- c(
 ## at that same x-position rather than hiding the spread behind a
 ## single averaged point. ----
 
+## Appends a "last" facet level (e.g. a summary "Pooled" panel) after
+## enough invisible filler levels that it lands in the bottom-right
+## cell of a facet_wrap(..., ncol = n) grid, rather than wherever it
+## happens to fall right after the last real panel. Filler levels are
+## named with 1, 2, 3, ... spaces (unique strings that print as
+## blank) so, combined with `drop = FALSE` in the facet_wrap() call,
+## they show as blank panels with no visible strip label -- not
+## panels named ".filler_1" or similar. `existing_levels` should be
+## the per-FG facet levels BEFORE the last level is added.
+pad_group_order_for_corner <- function(existing_levels, last_level, ncol){
+  n <- length(existing_levels)
+  pos_without_pad <- n + 1L
+  pad_needed <- (ncol - (pos_without_pad %% ncol)) %% ncol
+  filler <- if(pad_needed > 0) strrep(" ", seq_len(pad_needed)) else character(0)
+  c(existing_levels, filler, last_level)
+}
+
 build_period_timeseries <- function(dt, value_col, extra_group_cols = character(0)){
   
   dt <- copy(dt)
@@ -4893,19 +4910,19 @@ if(exists("west_published_comparison") && !is.null(west_published_comparison)){
     cause1_long <- rbindlist(list(
       cause1_data[, .(
         Simulation, Ratio = "M2/F",
-        Series = "8 species, ratio of sums",
+        Series = "8 FGs, ratio of sums",
         Value = M2F_pooled_simulated
       )],
       ratio_of_sums_vs_mean[Ratio == "M2/F" & SpeciesSet == "8 species (literal)", .(
-        Simulation, Ratio, Series = "8 species, mean of ratios", Value = MeanOfRatios
+        Simulation, Ratio, Series = "8 FGs, mean of ratios", Value = MeanOfRatios
       )],
       cause1_data[, .(
         Simulation, Ratio = "M2/F",
-        Series = "Assumed shared species, ratio of sums",
+        Series = "6 FGs (assumed shared), ratio of sums",
         Value = M2F_pooled_simulated_6species
       )],
       ratio_of_sums_vs_mean[Ratio == "M2/F" & SpeciesSet == "Assumed shared species", .(
-        Simulation, Ratio, Series = "Assumed shared species, mean of ratios", Value = MeanOfRatios
+        Simulation, Ratio, Series = "6 FGs (assumed shared), mean of ratios", Value = MeanOfRatios
       )],
       cause1_data[, .(
         Simulation, Ratio = "M2/F",
@@ -4914,19 +4931,19 @@ if(exists("west_published_comparison") && !is.null(west_published_comparison)){
       )],
       cause1_data[, .(
         Simulation, Ratio = "Q/Y",
-        Series = "8 species, ratio of sums",
+        Series = "8 FGs, ratio of sums",
         Value = QY_pooled_simulated
       )],
       ratio_of_sums_vs_mean[Ratio == "Q/Y" & SpeciesSet == "8 species (literal)", .(
-        Simulation, Ratio, Series = "8 species, mean of ratios", Value = MeanOfRatios
+        Simulation, Ratio, Series = "8 FGs, mean of ratios", Value = MeanOfRatios
       )],
       cause1_data[, .(
         Simulation, Ratio = "Q/Y",
-        Series = "Assumed shared species, ratio of sums",
+        Series = "6 FGs (assumed shared), ratio of sums",
         Value = QY_pooled_simulated_6species
       )],
       ratio_of_sums_vs_mean[Ratio == "Q/Y" & SpeciesSet == "Assumed shared species", .(
-        Simulation, Ratio, Series = "Assumed shared species, mean of ratios", Value = MeanOfRatios
+        Simulation, Ratio, Series = "6 FGs (assumed shared), mean of ratios", Value = MeanOfRatios
       )],
       cause1_data[, .(
         Simulation, Ratio = "Q/Y",
@@ -4940,10 +4957,10 @@ if(exists("west_published_comparison") && !is.null(west_published_comparison)){
     cause1_long <- cause1_long[!is.na(Value) & is.finite(Value) & Value > 0]
 
     series_levels <- c(
-      "8 species, ratio of sums",
-      "8 species, mean of ratios",
-      "Assumed shared species, ratio of sums",
-      "Assumed shared species, mean of ratios",
+      "8 FGs, ratio of sums",
+      "8 FGs, mean of ratios",
+      "6 FGs (assumed shared), ratio of sums",
+      "6 FGs (assumed shared), mean of ratios",
       "Published (West et al., 2025)"
     )
     cause1_long[, Series := factor(Series, levels = series_levels)]
@@ -5012,69 +5029,36 @@ if(exists("west_published_comparison") && !is.null(west_published_comparison)){
       facet_wrap(~Ratio, scales = "free_y", nrow = 2) +
       scale_y_log10() +
       scale_color_manual(values = c(
-        "8 species, ratio of sums" = "#D55E00",
-        "8 species, mean of ratios" = "#E69F00",
-        "Assumed shared species, ratio of sums" = "#0072B2",
-        "Assumed shared species, mean of ratios" = "#56B4E9",
+        "8 FGs, ratio of sums" = "#D55E00",
+        "8 FGs, mean of ratios" = "#E69F00",
+        "6 FGs (assumed shared), ratio of sums" = "#0072B2",
+        "6 FGs (assumed shared), mean of ratios" = "#56B4E9",
         "Published (West et al., 2025)" = "#009E73"
       )) +
       labs(
-        title = paste(
-          "Verifying the species grouping and the pooling method behind",
-          "the M2/F and Q/Y gaps"
-        ),
-        subtitle = paste0(
-          "Two factors, crossed, for both ratios: which species are ",
-          "assumed “shared” (all 8 named species -- American ",
-          "plaice, Arctic cod, Atlantic cod, capelin, Greenland halibut, ",
-          "herring, redfish, sand lance -- vs. the 6 with nonzero F and M2 ",
-          "in every baseline model, Section 2.5) and how their ratios are ",
-          "pooled (ratio of sums, as West et al. 2025 describe, vs. an ",
-          "unweighted mean of each species' own ratio). The assumed-",
-          "shared-species, ratio-of-sums line closely tracks published M2/F ",
-          "in every period, but only narrows the Q/Y gap (top row vs. ",
-          "bottom row); mean-of-ratios lines are far more volatile under ",
-          "either grouping and either ratio. Y-axis is log-scaled because ",
-          "of the range across series (note the extreme 1985-1987 8-species ",
-          "M2/F mean, driven by Sandlance's near-zero F); no published Q/Y ",
-          "value exists for 2013-2015."
-        ),
+        # Per request, shortened to just this -- subtitle removed.
+        title = "Simulations across grouping and pooling method for M2/F and Q/Y",
         x = "Baseline period", y = "Pooled ratio (log scale)", color = NULL
       ) +
       common_theme +
       theme(
         axis.text.x = element_text(angle = 30, hjust = 1),
-        plot.subtitle = element_text(size = 8),
         legend.text = element_text(size = 9)
       )
 
     cause1_caption <- paste(
-      "Figure: verifying both the species grouping and the pooling method",
-      "behind the gap between this report's pooled M2/F and Q/Y ratios and",
-      "West et al.'s (2025) published figures. The 8 named species are",
-      "American plaice (>35 cm), Arctic cod, Atlantic cod (>35 cm), capelin,",
-      "Greenland halibut, Atlantic herring, redfish, and sand lance (West et",
-      "al. 2025, Figs. 5-6); the assumed shared species are that list minus",
-      "Arctic cod and Sandlance (Section 2.5). Arctic cod has F = 0 in every",
-      "period in this EwE reproduction, and Sandlance has F = 0 outside",
-      "1985-1987 -- both still have nonzero M2 and nonzero diet-based",
-      "consumption (the harp seal does eat them), so summing M2 (or Q) and",
-      "F (or Y) across the literal 8-species set credits their numerator to",
-      "the pooled ratio while they add nothing to the denominator,",
-      "inflating it. The combined M2/F and Q/Y these two species add to the",
-      "8-species sum, per baseline period (the mechanism in the model's own",
-      "numbers), is given below the plot. Restricting the",
-      "same sum to the assumed shared species brings this report's pooled",
-      "M2/F into close agreement with West et al.'s (2025) published value",
-      "in every baseline model (top row), but only narrows -- does not",
-      "close -- the corresponding Q/Y gap (bottom row), because Q/Y has a",
-      "second, independent cause (see the companion Cause 2 figure).",
-      "Separately, taking an unweighted mean of each species' own ratio",
-      "instead of summing -- under either species grouping, for either",
-      "ratio -- is far more volatile and far less consistent with the",
-      "published value, confirming West et al.'s (2025) published values",
-      "are consistent only with their stated sum-then-divide method",
-      "(Section 3.2), not with an average of individual species ratios."
+      "Figure: pooled M2/F and Q/Y recomputed four ways across the four",
+      "baseline simulations (1985-1987, 2013-2015, 2018-2020 50/50,",
+      "2018-2020 80/20), crossing species grouping -- the 8 FGs West et",
+      "al. (2025) name (American plaice, Arctic cod, Atlantic cod, capelin,",
+      "Greenland halibut, Atlantic herring, redfish, sand lance) vs. the",
+      "6 FGs \"assumed shared\" (that list minus Arctic cod and sand lance,",
+      "Section 2.5) -- with pooling method (ratio-of-sums, as West et al.",
+      "(2025) describe, vs. mean-of-ratios), against their published",
+      "value. Only the 6-FG, ratio-of-sums line tracks published M2/F",
+      "closely; it narrows but doesn't close the Q/Y gap (a separate",
+      "cause, see Cause 2 figure). Mean-of-ratios is far more volatile",
+      "under either grouping."
     )
     cat("\n", cause1_caption, "\n", sep = "")
     cat(
@@ -5099,6 +5083,270 @@ if(exists("west_published_comparison") && !is.null(west_published_comparison)){
 
 } else {
   cat("\nSkipping Cause 1 figure -- west_published_comparison not available.\n")
+}
+
+#=========================================================
+# Pooled M2/F and Q/Y ratio across every sensitivity scenario
+# (HarpSeal_PooledRatio_SensitivityAcrossModels.png)
+#=========================================================
+## Same pooled ratio as the Cause 1 figure above (assumed shared
+## 6-species set, ratio-of-sums), but shown for every Q/B and diet
+## sensitivity scenario, not just the baseline Model -- shows exactly
+## where this report's own baseline and West et al.'s (2025) published
+## value sit relative to every other simulation, on a linear (not
+## log) scale. The combined qb-30_diet_cod exploratory run is
+## excluded per Andrea's instruction, and the 2018-2020-only
+## exploratory "alternative" scenario (Section 2.6) is shown as a
+## table instead of in this plot, per request. Biomass (b+-)
+## sensitivity is not included either: it is reported separately as a
+## continuous time series (see the Biomass/Fishing mortality/Natural
+## mortality/Total mortality figure), not as a discrete scenario
+## alongside Q/B and diet, so it was never part of this categorical
+## "Model" comparison family in the first place.
+if(exists("west_published_comparison") && !is.null(west_published_comparison)){
+
+  ## Same Model set and the same colours/order as the other sensitivity
+  ## figures in this script (Section 3.2) -- copied locally rather than
+  ## relying on `simulation_order`/`model_cols`, which are only defined
+  ## later in the script, to keep this figure self-contained next to
+  ## the other Cause 1/2 figures above. qb-30_diet_cod (the combined
+  ## exploratory Q/B+diet run) is excluded per Andrea's instruction.
+  pooled_sens_order <- c(
+    "baseline",
+    "qb-30", "qb-15", "qb+15", "qb+30",
+    "diet-20", "diet-20pisciv"
+  )
+  pooled_sens_cols <- c(
+    "baseline" = "black",
+    "qb-30" = "#A6DAD3", "qb-15" = "#66C2B7",
+    "qb+15" = "#1F9E89", "qb+30" = "#006D5B",
+    "diet-20" = "#FDD49E", "diet-20pisciv" = "#E66101"
+  )
+
+  pooled_sens_long <- rbindlist(list(
+    west_published_comparison[
+      Model %in% pooled_sens_order &
+        !is.na(M2F_pooled_simulated_6species),
+      .(
+        Simulation, Model, Ratio = "M2/F",
+        Value = M2F_pooled_simulated_6species,
+        Published = M2F_pooled_published
+      )
+    ],
+    west_published_comparison[
+      Model %in% pooled_sens_order &
+        !is.na(QY_pooled_simulated_6species),
+      .(
+        Simulation, Model, Ratio = "Q/Y",
+        Value = QY_pooled_simulated_6species,
+        Published = QY_pooled_published
+      )
+    ]
+  ))
+
+  if(nrow(pooled_sens_long) > 0){
+
+    pooled_sens_long[, Model := factor(Model, levels = pooled_sens_order)]
+    pooled_sens_long[, Simulation := factor(
+      Simulation,
+      levels = if(exists("cause1_data")) levels(cause1_data$Simulation) else
+        sort(unique(pooled_sens_long$Simulation))
+    )]
+    pooled_sens_long[, Ratio := factor(Ratio, levels = c("M2/F", "Q/Y"))]
+
+    ## Baseline and published are drawn with exactly the same geometry
+    ## as every other point/scenario -- a plain point for baseline (it
+    ## is already distinguished by colour, black, same as every other
+    ## sensitivity figure in this script) and a plain dashed line for
+    ## published, with no asterisk, star, or other special reference
+    ## marker: both the simulated and the published number are already
+    ## pooled ratios of the same kind, so neither needs a different
+    ## symbol to flag it as a "reference" the way a per-FG estimate
+    ## would need one when compared against a single pooled figure.
+    p_pooled_sensitivity <- ggplot(
+      pooled_sens_long, aes(x = Model, y = Value, colour = Model)
+    ) +
+      geom_point(size = 2.8) +
+      geom_text(
+        aes(label = sprintf("%.1f", Value)),
+        vjust = -0.9, size = 2.4, show.legend = FALSE
+      ) +
+      ## West et al.'s (2025) published pooled ratio for that period,
+      ## as a bold dashed reference line with its own legend entry in
+      ## every facet (absent for 2013-2015 Q/Y, which West et al.,
+      ## 2025, never published). FIXED: inherit.aes = FALSE added --
+      ## without it, this layer inherited `colour = Model` from the
+      ## plot-level aes() above, so the dashed line was drawn once per
+      ## Model colour (all overlapping at the same y position) instead
+      ## of as one single, clearly visible line, which is almost
+      ## certainly why it was hard to see.
+      geom_hline(
+        aes(
+          yintercept = Published,
+          linetype = "West et al. (2025) published"
+        ),
+        colour = "#B2182B", linewidth = 1, inherit.aes = FALSE
+      ) +
+      facet_wrap(~Ratio + Simulation, scales = "free_y", nrow = 2) +
+      scale_colour_manual(values = pooled_sens_cols, guide = "none") +
+      scale_linetype_manual(
+        name = NULL,
+        values = c("West et al. (2025) published" = "dashed")
+      ) +
+      labs(
+        title = paste(
+          "Pooled M2/F and Q/Y ratio (assumed shared species,",
+          "ratio-of-sums) across every sensitivity scenario"
+        ),
+        subtitle = paste(
+          "Linear scale, not log. Dashed line: West et al.'s (2025)",
+          "published pooled ratio for that period (no line in the",
+          "2013-2015 Q/Y facet -- West et al., 2025, did not publish a",
+          "Q/Y value for that period). Black point: this report's own",
+          "baseline model. Coloured points: Q/B and diet sensitivity",
+          "scenarios (Section 2.6). The 2018-2020-only exploratory",
+          "\"alternative\" scenario (Table 5) is shown separately as a",
+          "table, not in this plot. All values use the same",
+          "assumed-shared 6-species set and ratio-of-sums method as the",
+          "baseline comparison (Section 2.5, Section 3.1); simulated and",
+          "published values are both pooled ratios of the same kind, so",
+          "neither is marked with a special reference symbol."
+        ),
+        x = NULL, y = "Pooled ratio"
+      ) +
+      common_theme +
+      theme(
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 7),
+        plot.subtitle = element_text(size = 8)
+      )
+
+    ggsave(
+      file.path(output_dir, "HarpSeal_PooledRatio_SensitivityAcrossModels.png"),
+      p_pooled_sensitivity,
+      width = 15, height = 10, dpi = 300
+    )
+
+    cat(
+      "\nSaved HarpSeal_PooledRatio_SensitivityAcrossModels.png -- pooled",
+      " M2/F and Q/Y ratio (assumed shared species, ratio-of-sums),",
+      " linear scale, across every Q/B/diet sensitivity scenario,",
+      " against this report's own baseline and West et al.'s (2025)",
+      " published value, for every baseline period.\n"
+    )
+
+  } else {
+    cat(
+      "\nSkipping pooled-ratio sensitivity figure -- no sensitivity",
+      " scenario has a valid M2F_pooled_simulated_6species or",
+      " QY_pooled_simulated_6species value.\n"
+    )
+  }
+
+} else {
+  cat(
+    "\nSkipping pooled-ratio sensitivity figure -- west_published_",
+    "comparison not available.\n"
+  )
+}
+
+#=========================================================
+# Table: pooled M2/F and Q/Y for the "alternative" exploratory
+# scenario (Table 5, 2018-2020 only), vs. West et al.'s (2025)
+# published pooled value
+#=========================================================
+## Not shown in any plot (per request, the "alternative" scenario is
+## reviewed as a table instead) -- but the underlying numbers are the
+## same ones already in `west_published_comparison`/
+## HarpSeal_PooledRatio_Published_vs_Simulated_AllModels.csv. This
+## table just coalesces the "alternative" scenario's own split-label
+## quirk into one row per Simulation and adds explicit discrepancy
+## columns, so it's easy to read at a glance how far "alternative"
+## sits from West et al.'s (2025) published value. The quirk: the
+## "alternative" folder has only Mortalities/Predation mortality
+## files (so its M2/F is tagged with an empty Model string in
+## `west_published_comparison`), and its Q/Y reuses baseline's
+## Biomass/Diet composition (so Q/Y is tagged "alternative") -- see
+## the standalone pooled-ratio-across-sensitivity-scenarios figure
+## above for the full explanation. Coalesced here into a single
+## "alternative" row per Simulation.
+if(exists("west_published_comparison") && !is.null(west_published_comparison)){
+
+  alt_m2f <- west_published_comparison[
+    Model == "" & !is.na(M2F_pooled_simulated_6species),
+    .(Period, Simulation, M2F_pooled_simulated_6species, M2F_pooled_published)
+  ]
+  alt_qy <- west_published_comparison[
+    Model == "alternative" & !is.na(QY_pooled_simulated_6species),
+    .(Period, Simulation, QY_pooled_simulated_6species, QY_pooled_published)
+  ]
+
+  alternative_vs_published <- merge(
+    alt_m2f, alt_qy, by = c("Period", "Simulation"), all = TRUE
+  )
+
+  if(nrow(alternative_vs_published) > 0){
+
+    alternative_vs_published[, Model := "alternative"]
+
+    alternative_vs_published[, M2F_diff := M2F_pooled_simulated_6species - M2F_pooled_published]
+    alternative_vs_published[, M2F_ratio_to_published := M2F_pooled_simulated_6species / M2F_pooled_published]
+    alternative_vs_published[, QY_diff := QY_pooled_simulated_6species - QY_pooled_published]
+    alternative_vs_published[, QY_ratio_to_published := QY_pooled_simulated_6species / QY_pooled_published]
+
+    setorder(alternative_vs_published, Period, Simulation)
+    setcolorder(alternative_vs_published, c(
+      "Period", "Simulation", "Model",
+      "M2F_pooled_simulated_6species", "M2F_pooled_published",
+      "M2F_diff", "M2F_ratio_to_published",
+      "QY_pooled_simulated_6species", "QY_pooled_published",
+      "QY_diff", "QY_ratio_to_published"
+    ))
+
+    ## Period-collapsed summary row -- mean across the two 2018-2020
+    ## population-split composites (5050/8020), the same convention
+    ## used everywhere else in this script for that period.
+    alternative_vs_published_periodmean <- alternative_vs_published[, .(
+      M2F_pooled_simulated_6species = mean(M2F_pooled_simulated_6species, na.rm = TRUE),
+      M2F_pooled_published = mean(M2F_pooled_published, na.rm = TRUE),
+      QY_pooled_simulated_6species = mean(QY_pooled_simulated_6species, na.rm = TRUE),
+      QY_pooled_published = mean(QY_pooled_published, na.rm = TRUE)
+    ), by = .(Period, Model)]
+    alternative_vs_published_periodmean[, M2F_diff := M2F_pooled_simulated_6species - M2F_pooled_published]
+    alternative_vs_published_periodmean[, M2F_ratio_to_published := M2F_pooled_simulated_6species / M2F_pooled_published]
+    alternative_vs_published_periodmean[, QY_diff := QY_pooled_simulated_6species - QY_pooled_published]
+    alternative_vs_published_periodmean[, QY_ratio_to_published := QY_pooled_simulated_6species / QY_pooled_published]
+
+    cat(
+      "\nPooled M2/F and Q/Y for the \"alternative\" exploratory",
+      " scenario (Table 5, 2018-2020 only), vs. West et al.'s (2025)",
+      " published pooled value:\n", sep = ""
+    )
+    print(alternative_vs_published)
+    cat("\nPeriod-collapsed (mean across 2018-2020_5050/8020):\n")
+    print(alternative_vs_published_periodmean)
+
+    fwrite(
+      alternative_vs_published,
+      file.path(output_dir, "HarpSeal_PooledRatio_Alternative_vs_Published.csv")
+    )
+    fwrite(
+      alternative_vs_published_periodmean,
+      file.path(output_dir, "HarpSeal_PooledRatio_Alternative_vs_Published_PeriodMean.csv")
+    )
+
+  } else {
+    cat(
+      "\nSkipping \"alternative\" vs. published table -- no matching",
+      " rows found in west_published_comparison for Model \"\"",
+      " (M2/F) or \"alternative\" (Q/Y).\n"
+    )
+  }
+
+} else {
+  cat(
+    "\nSkipping \"alternative\" vs. published table -- west_published_",
+    "comparison not available.\n"
+  )
 }
 
 #=========================================================
@@ -8339,6 +8587,116 @@ reported[
 ]
 
 #=========================================================
+# "Pooled (assumed shared species)" facet
+#=========================================================
+## An extra panel alongside the per-FG ones, same idea as the D3 Fig
+## 2/3 Pooled facet and the D3 Fig 1 Pooled companion figure, but for
+## THIS figure's baseline-only M2/F and Q/Y (no sensitivity models
+## here, so Metric -- not Model -- stays the colour dimension).
+## Reused from `west_published_comparison`, Model == "baseline" only,
+## so this panel and the other Pooled figures/panels always agree.
+d1fig1_group_order <- sort(unique(as.character(m2fqy_mean$Group)))
+
+if(exists("west_published_comparison") && !is.null(west_published_comparison)){
+
+  d1fig1_pooled_sim <- rbindlist(list(
+    west_published_comparison[
+      Model == "baseline" & !is.na(M2F_pooled_simulated_6species),
+      .(Simulation, Metric = "M2 / F", Value = M2F_pooled_simulated_6species)
+    ],
+    west_published_comparison[
+      Model == "baseline" & !is.na(QY_pooled_simulated_6species),
+      .(Simulation, Metric = "Q / Y", Value = QY_pooled_simulated_6species)
+    ]
+  ))
+
+  d1fig1_pooled_sim[, Period := fifelse(
+    grepl("^2018-2020", Simulation), "2018-2020", Simulation
+  )]
+  d1fig1_pooled_sim[, Period := factor(
+    Period, levels = c("1985-1987", "2013-2015", "2018-2020")
+  )]
+
+  d1fig1_pooled_mean <- d1fig1_pooled_sim[, .(
+    Value = mean(Value, na.rm = TRUE)
+  ), by = .(Metric, Period)]
+  d1fig1_pooled_mean[, PeriodNum := as.numeric(Period)]
+  d1fig1_pooled_mean[, Group := "FG Pooled"]
+
+  d1fig1_pooled_range <- d1fig1_pooled_sim[, .(
+    ymin = min(Value, na.rm = TRUE),
+    ymax = max(Value, na.rm = TRUE)
+  ), by = .(Metric, Period)]
+  d1fig1_pooled_range[, PeriodNum := as.numeric(Period)]
+  d1fig1_pooled_range[, Group := "FG Pooled"]
+
+  ## Per request, the per-FG panels no longer show West et al.'s
+  ## (2025) published value at all (`reported` is no longer drawn as
+  ## its own layer -- see the ggplot below), so it doesn't need a
+  ## Group column to scope it away from the new "FG Pooled" panel.
+
+  ## "FG Pooled" is placed last, after enough blank filler panels
+  ## that it lands in the bottom-right cell of the ncol = 5 grid
+  ## below, rather than wherever it happens to fall right after the
+  ## last species.
+  d1fig1_group_order <- pad_group_order_for_corner(
+    d1fig1_group_order, "FG Pooled", ncol = 5
+  )
+
+  m2fqy_mean[, Group := factor(as.character(Group), levels = d1fig1_group_order)]
+  m2fqy_range[, Group := factor(as.character(Group), levels = d1fig1_group_order)]
+
+  m2fqy_mean <- rbind(
+    m2fqy_mean,
+    d1fig1_pooled_mean[, .(Period, Group, Metric, Value, PeriodNum)],
+    fill = TRUE
+  )
+  m2fqy_range <- rbind(
+    m2fqy_range,
+    d1fig1_pooled_range[, .(Group, Metric, PeriodNum, ymin, ymax)],
+    fill = TRUE
+  )
+
+  m2fqy_mean[, Group := factor(as.character(Group), levels = d1fig1_group_order)]
+  m2fqy_range[, Group := factor(as.character(Group), levels = d1fig1_group_order)]
+
+  ## West et al.'s (2025) published pooled M2/F and Q/Y, drawn as a
+  ## purple (M2/F) and gold/brown (Q/Y) asterisk with its own shape
+  ## legend entry, per request -- matching this figure's own Metric
+  ## colour scheme and the "two asterisks" convention this figure used
+  ## in earlier versions. Unlike the per-FG panels (which show no
+  ## published reference at all now), the pooled M2/F series also has
+  ## a published 2013-2015 value (14.1).
+  d1fig1_reported_pooled <- rbindlist(list(
+    data.table(
+      PeriodNum = c(1, 2, 3),
+      Ratio = c(1.3, 14.1, 17.3),
+      Metric = "M2 / F"
+    ),
+    data.table(
+      PeriodNum = c(1, 3),
+      Ratio = c(1.7, 24.0),
+      Metric = "Q / Y"
+    )
+  ))
+  ## IMPORTANT: this must be a factor with the SAME level order
+  ## (`d1fig1_group_order`, which already has "FG Pooled" padded to
+  ## land in the bottom-right cell) as `m2fqy_mean`/`m2fqy_range`
+  ## above, not a plain character string. When facet_wrap(~Group)
+  ## combines the facetting variable across this layer and the
+  ## others, a layer whose Group is unordered character (rather than
+  ## a factor matching the other layers' explicit level order) makes
+  ## ggplot fall back to sorting ALL panels alphabetically -- which
+  ## is exactly why "FG Pooled" was appearing in its alphabetical (D/G)
+  ## slot instead of the bottom-right corner.
+  d1fig1_reported_pooled[, Group := factor("FG Pooled", levels = d1fig1_group_order)]
+
+} else {
+  d1fig1_reported_pooled <- NULL
+  cat("\nD1 Fig 1 -- west_published_comparison not available, skipping the added \"FG Pooled\" facet.\n")
+}
+
+#=========================================================
 # Plot
 #=========================================================
 #=========================================================
@@ -8398,26 +8756,30 @@ geom_point(
 ) +
   
   #-------------------------------------------------------
-# 4. Published estimates
-# FIXED: moved from first layer to last -- drawn first (behind
-# model lines and points) meant the asterisk markers could be
-# covered wherever a trend line or the mean point sat at the same
-# spot. Drawing them last puts the published-value asterisks on
-# top of everything else, so they stay visible.
+# 4. Published estimate (FG Pooled panel only)
+# Per request, the per-FG panels no longer show West et al.'s (2025)
+# published value at all -- only species/simulations. In the "FG
+# Pooled" panel, where we ARE comparing a pooled simulated ratio with
+# West et al.'s own pooled published ratio, it's shown as a purple
+# (M2/F) and gold/brown (Q/Y) asterisk, matching this figure's own
+# Metric colour scheme -- the same "two asterisks" convention this
+# figure used in earlier versions, switched back to from the dashed
+# reference line per request.
 #-------------------------------------------------------
 
 geom_point(
-  data = reported,
-  aes(
-    x = PeriodNum,
-    y = Ratio,
-    colour = Metric,
-    shape = Published
-  ),
-  size = 2,
-  stroke = 1
-) +
-  
+    data = d1fig1_reported_pooled,
+    aes(
+      x = PeriodNum,
+      y = Ratio,
+      colour = Metric,
+      shape = "West et al. (2025) published"
+    ),
+    size = 3,
+    stroke = 1,
+    inherit.aes = FALSE
+  ) +
+
   #-------------------------------------------------------
 # Colour
 #-------------------------------------------------------
@@ -8426,7 +8788,7 @@ scale_colour_manual(
   values = metric_cols,
   name = "Baseline EwE models"
 ) +
-  
+
   #-------------------------------------------------------
 # Fill
 #-------------------------------------------------------
@@ -8436,21 +8798,16 @@ scale_fill_manual(
   name = NULL,
   guide = "none"
 ) +
-  
+
   #-------------------------------------------------------
-# Published asterisks
+# Published asterisk legend (FG Pooled panel only)
 #-------------------------------------------------------
 
 scale_shape_manual(
-  values = c(
-    "M2/F = 1.3 (1985-1987)" = 8,
-    "Q/Y = 1.7 (1985-1987)"  = 8,
-    "M2/F = 17 (2018-2020)"   = 8,
-    "Q/Y = 24 (2018-2020)"    = 8
-  ),
-  name = "Published in West et al. (2025) — pooled, 8 exploited fish species"
+  name = NULL,
+  values = c("West et al. (2025) published" = 8)
 ) +
-  
+
   #-------------------------------------------------------
 # Facets
 #-------------------------------------------------------
@@ -8458,9 +8815,10 @@ scale_shape_manual(
 facet_wrap(
   ~Group,
   scales = "free_y",
-  ncol = 5
+  ncol = 5,
+  drop = FALSE
 ) +
-  
+
   #-------------------------------------------------------
 # X axis
 #-------------------------------------------------------
@@ -8483,10 +8841,12 @@ scale_x_continuous(
 #-------------------------------------------------------
 
 guides(
-  
-  # Baseline EwE models
+
+  # Baseline EwE models -- per request, shown first, with the
+  # published asterisk legend after it, on the same row.
   colour = guide_legend(
     order = 1,
+    nrow = 1,
     override.aes = list(
       shape = 21,
       fill = c(
@@ -8497,25 +8857,20 @@ guides(
       linewidth = 0.7
     )
   ),
-  
-  # Published estimates
+
+  # Published asterisk (FG Pooled panel only) -- shown after the
+  # colour/symbol legend, on the same row.
   shape = guide_legend(
     order = 2,
-    nrow = 2,
-    byrow = TRUE,
+    nrow = 1,
     override.aes = list(
-      shape = 8,
-      colour = c(
-        metric_cols["M2 / F"],
-        metric_cols["Q / Y"],
-        metric_cols["M2 / F"],
-        metric_cols["Q / Y"]
-      ),
-      size = 2.8
+      colour = "black",
+      size = 3,
+      stroke = 1
     )
   )
 ) +
-  
+
   #-------------------------------------------------------
 # Theme
 #-------------------------------------------------------
@@ -8552,32 +8907,34 @@ theme_bw(base_size = 11) +
       face = "plain"
     ),
     
-    # Two legend rows
-    legend.box = "vertical",
-    
-    # Left-justify both legend rows
+    # Per request, both guides now sit side by side on one row
+    # (shape/asterisk first, then the colour/symbol legend), rather
+    # than stacked as two separate rows.
+    legend.box = "horizontal",
+
+    # Left-justify the combined legend row
     legend.justification = "left",
     legend.box.just = "left",
-    
-    # Minimal space between legend rows
-    legend.spacing.y = unit(
-      0,
+
+    # Minimal space between the two guides
+    legend.spacing.x = unit(
+      0.4,
       "cm"
     ),
-    
+
     legend.margin = margin(
       0,
       0,
       0,
       0
     ),
-    
+
     legend.key.width = unit(
       1.1,
       "cm"
     )
   ) +
-  
+
   labs(
     x = NULL,
     y = NULL
@@ -8591,20 +8948,24 @@ pfig1_caption <- paste(
   "D1 - Fig 1. Temporal comparison of harp seal predation mortality",
   "relative to fishing mortality (M2/F) and harp seal consumption",
   "relative to fisheries yield (Q/Y) for exploited seal prey species",
-  "under the baseline model. Filled circles show the period mean and",
-  "lines show the temporal trend. The shaded band around each line",
-  "shows the range across baseline simulations for that period; for",
-  "2018-2020 this reflects the 50/50 and 80/20 population-split",
+  "under the baseline model, plus an added \"FG Pooled\" panel",
+  "(bottom-right) showing the same two ratios pooled across the",
+  "assumed shared 6-species set -- a panel directly comparable to",
+  "West et al.'s (2025) published pooled headline estimate, unlike",
+  "the per-FG panels next to it. Filled circles show the period mean",
+  "and lines show the temporal trend. The shaded band around each",
+  "line shows the range across baseline simulations for that period;",
+  "for 2018-2020 this reflects the 50/50 and 80/20 population-split",
   "composites, both carried forward as separate baseline simulations,",
   "whereas 1985-1987 and 2013-2015 each have only one baseline",
-  "simulation, so the band collapses onto the line there. Asterisks",
-  "show the published estimates reported by West et al. (2025):",
-  "M2/F = 1.3 and Q/Y = 1.7 for 1985-1987, and M2/F = 17 and Q/Y = 24",
-  "for 2018-2020. These are West et al.'s (2025) single pooled",
-  "estimates, averaged across multiple species and repeated",
-  "identically across panels as a common reference point; they are",
-  "not per-FG published values and are not directly comparable to",
-  "any individual FG's own estimate shown here."
+  "simulation, so the band collapses onto the line there. Per",
+  "request, the per-FG panels do not show West et al.'s (2025)",
+  "published value at all -- only species and simulations. In the",
+  "FG Pooled panel, that published value is shown instead as a",
+  "purple (M2/F) and gold/brown (Q/Y) asterisk, matching this",
+  "figure's own Metric colours, with its own shape legend entry (a",
+  "2013-2015 M2/F value of 14.1 was also published, though no",
+  "corresponding Q/Y value was)."
 )
 
 cat("\n", pfig1_caption, "\n", sep = "")
@@ -8616,18 +8977,18 @@ ggsave(
   ),
   pfig1,
   width = 13,
-  height = 9,
+  height = 11,
   dpi = 300
 )
 
 #---------------------------------------------------------
-# Second version, without West et al.'s (2025) published Cod-adult
-# headline markers (per review feedback on Figures 2, 4, 5, 6, S1,
-# S2: `reported` above has no Group column, so this is the same
-# single repeated Cod-adult reference value shown in every panel,
-# not a per-FG published estimate -- same rationale as D3 Fig 1/2/3).
-# Non-destructive: copies the finished plot and drops just its last
-# geom layer, which the `reported` geom_point is guaranteed to be.
+# Second version, without West et al.'s (2025) published asterisk in
+# the FG Pooled panel (the only published-reference layer left, now
+# that the per-FG panels show none at all). Non-destructive: copies
+# the finished plot and drops just its last geom layer, which the
+# `d1fig1_reported_pooled` geom_point above is guaranteed to be (it
+# is added last, specifically so it stays on top of the other
+# layers).
 #---------------------------------------------------------
 pfig1_noref <- pfig1
 pfig1_noref$layers[[length(pfig1_noref$layers)]] <- NULL
@@ -8639,7 +9000,7 @@ ggsave(
   ),
   pfig1_noref,
   width = 13,
-  height = 9,
+  height = 11,
   dpi = 300
 )
 
@@ -10042,9 +10403,13 @@ if(exists("ratio_compare") && nrow(ratio_compare) > 0){
   # Settings
   #=========================================================
   
+  ## Per request: label these facets to parallel the companion Pooled
+  ## figure's "M2/F (Pooled)" / "Q/Y (Pooled)" facet titles, so the two
+  ## figures read as one matched pair rather than looking like
+  ## differently-styled figures.
   metric_levels <- c(
-    "M2 / F",
-    "Q / Y"
+    "M2/F (Adult cod)",
+    "Q/Y (Adult cod)"
   )
   
   period_levels <- c(
@@ -10068,8 +10433,7 @@ if(exists("ratio_compare") && nrow(ratio_compare) > 0){
     "qb+15",
     "qb+30",
     "diet-20",
-    "diet-20pisciv",
-    "qb-30_diet_cod"
+    "diet-20pisciv"
   )
   
   #=========================================================
@@ -10160,56 +10524,11 @@ if(exists("ratio_compare") && nrow(ratio_compare) > 0){
     )
   ]
   
-  #=========================================================
-  # Published estimates
-  # West et al. (2025)
-  #=========================================================
-  
-  qb_published <- data.table(
-    
-    Period = factor(
-      c(
-        "1985-1987",
-        "1985-1987",
-        "2018-2020",
-        "2018-2020"
-      ),
-      levels = period_levels
-    ),
-    
-    Ratio = c(
-      1.3,
-      1.7,
-      17,
-      24
-    ),
-    
-    Metric = factor(
-      c(
-        "M2 / F",
-        "Q / Y",
-        "M2 / F",
-        "Q / Y"
-      ),
-      levels = metric_levels
-    ),
-    
-    Published = factor(
-      c(
-        "M2/F = 1.3 (1985-1987)",
-        "Q/Y = 1.7 (1985-1987)",
-        "M2/F = 17 (2018-2020)",
-        "Q/Y = 24 (2018-2020)"
-      ),
-      levels = c(
-        "M2/F = 1.3 (1985-1987)",
-        "Q/Y = 1.7 (1985-1987)",
-        "M2/F = 17 (2018-2020)",
-        "Q/Y = 24 (2018-2020)"
-      )
-    )
-  )
-  
+  ## Per request, this Cod-adult figure no longer shows West et al.'s
+  ## (2025) published value at all (no asterisk) -- that comparison
+  ## lives only in the companion Pooled figure below, so `qb_published`
+  ## (which only fed the removed asterisk layer) has been removed.
+
   #=========================================================
   # Model colours
   #
@@ -10237,17 +10556,14 @@ if(exists("ratio_compare") && nrow(ratio_compare) > 0){
     
     # Diet sensitivity
     "diet-20" = "#FDD49E",
-    "diet-20pisciv" = "#E66101",
-    
-    # Combined Q/B-30% + cod diet exploratory run
-    "qb-30_diet_cod" = "#bf812d"
+    "diet-20pisciv" = "#E66101"
   )
-  
+
   # Reorder colours to exactly match simulation order
   model_cols <- model_cols[
     simulation_order
   ]
-  
+
   #=========================================================
   # Plot
   #=========================================================
@@ -10286,7 +10602,86 @@ if(exists("ratio_compare") && nrow(ratio_compare) > 0){
   
   qb_range[is.na(ymin), ymin := Value]
   qb_range[is.na(ymax), ymax := Value]
-  
+
+  #=========================================================
+  # "Pooled (assumed shared species)" sensitivity trend
+  #=========================================================
+  ## Built here as its OWN, separate data set (qb_pooled_line /
+  ## qb_published_pooled) -- NOT merged into qb_period_data/qb_range,
+  ## so the Cod-adult-only figure below is completely untouched. Per
+  ## request, Cod adult (per-species) and Pooled (across-species) are
+  ## two distinct figures now, not one combined facet grid. Does NOT
+  ## include the "alternative" exploratory scenario (per request,
+  ## shown as a table instead, not in any plot); only carries the
+  ## Models already in `simulation_order` (which also excludes
+  ## "qb-30_diet_cod", removed above). Reused from
+  ## `west_published_comparison`, the same source as the standalone
+  ## HarpSeal_PooledRatio_SensitivityAcrossModels.png figure and the D3
+  ## Fig 2/3 Pooled facet, so all three stay in agreement.
+  qb_pooled_metric_levels <- c("M2/F (Pooled)", "Q/Y (Pooled)")
+
+  if(exists("west_published_comparison") && !is.null(west_published_comparison)){
+
+    qb_pooled_sim <- rbindlist(list(
+      west_published_comparison[
+        Model %in% simulation_order & !is.na(M2F_pooled_simulated_6species),
+        .(Model, Simulation, Metric = "M2/F (Pooled)", Value = M2F_pooled_simulated_6species)
+      ],
+      west_published_comparison[
+        Model %in% simulation_order & !is.na(QY_pooled_simulated_6species),
+        .(Model, Simulation, Metric = "Q/Y (Pooled)", Value = QY_pooled_simulated_6species)
+      ]
+    ))
+
+    qb_pooled_sim[, Period := fcase(
+      grepl("1985", Simulation), "1985-1987",
+      grepl("2013", Simulation), "2013-2015",
+      grepl("2018", Simulation), "2018-2020",
+      default = NA_character_
+    )]
+    qb_pooled_sim <- qb_pooled_sim[!is.na(Period)]
+
+    qb_pooled_line <- qb_pooled_sim[, .(
+      Value = mean(Value, na.rm = TRUE),
+      ymin = min(Value, na.rm = TRUE),
+      ymax = max(Value, na.rm = TRUE)
+    ), by = .(Model, Metric, Period)]
+
+    qb_pooled_line[, Metric := factor(Metric, levels = qb_pooled_metric_levels)]
+    qb_pooled_line[, Model := factor(as.character(Model), levels = simulation_order)]
+    qb_pooled_line[, Period := factor(Period, levels = period_levels)]
+    qb_pooled_line[, PeriodNum := as.numeric(Period)]
+
+    ## West et al.'s (2025) published pooled M2/F and Q/Y, drawn as a
+    ## short dashed tick at each known period -- not an asterisk, since
+    ## this is a pooled-vs-pooled comparison like the D3 Fig 2/3 Pooled
+    ## facet and the standalone sensitivity-across-models figure,
+    ## neither of which uses the asterisk marker reserved for per-
+    ## species/per-FG published values. Unlike the Cod-adult asterisks
+    ## below (1985-1987 and 2018-2020 only), the pooled M2/F series
+    ## also has a published 2013-2015 value (14.1), so it's included
+    ## here; no 2013-2015 Q/Y value was published.
+    qb_published_pooled <- rbindlist(list(
+      data.table(
+        Period = factor(c("1985-1987", "2013-2015", "2018-2020"), levels = period_levels),
+        Ratio = c(1.3, 14.1, 17.3),
+        Metric = "M2/F (Pooled)"
+      ),
+      data.table(
+        Period = factor(c("1985-1987", "2018-2020"), levels = period_levels),
+        Ratio = c(1.7, 24.0),
+        Metric = "Q/Y (Pooled)"
+      )
+    ))
+    qb_published_pooled[, Metric := factor(Metric, levels = qb_pooled_metric_levels)]
+    qb_published_pooled[, PeriodNum := as.numeric(Period)]
+
+  } else {
+    qb_pooled_line <- NULL
+    qb_published_pooled <- NULL
+    cat("\nD3 Fig 1 Pooled -- west_published_comparison not available, skipping this figure.\n")
+  }
+
   p_d3fig1 <- ggplot(
     qb_period_data$mean_line,
     aes(
@@ -10374,71 +10769,43 @@ if(exists("ratio_compare") && nrow(ratio_compare) > 0){
   ) +
     
     #-------------------------------------------------------
-  # 4. Published West et al. (2025) estimates
-  # FIXED: moved from layer 2 to last -- drawn earlier, the
-  # asterisk markers could be hidden under a simulation trend line,
-  # the baseline overlay, or a mean-estimate point that landed at
-  # the same spot. Drawing them last puts the published-value
-  # asterisks on top of every other layer, so they stay visible.
+  # Per request, this Cod-adult-only panel no longer shows West et
+  # al.'s (2025) published value at all -- only species/simulations.
+  # It remains on the companion "Pooled" figure
+  # (D3_Fig1_Pooled_QBSensitivityTrend.png), which IS directly
+  # comparable to that published value.
   #-------------------------------------------------------
-  
-  geom_point(
-    data = qb_published,
-    aes(
-      x = as.numeric(Period),
-      y = Ratio,
-      shape = Published
-    ),
-    colour = "black",
-    size = 3,
-    stroke = 0.8,
-    inherit.aes = FALSE
-  ) +
-    
+
     #=======================================================
   # Simulation colours
   #=======================================================
-  
+
   scale_colour_manual(
     values = model_cols,
     breaks = simulation_order,
     labels = simulation_order,
     name = "Simulations"
   ) +
-    
+
     scale_fill_manual(
       values = model_cols,
       breaks = simulation_order,
       guide = "none"
     ) +
-    
-    #=======================================================
-  # Published estimates legend
-  #=======================================================
-  
-  scale_shape_manual(
-    values = c(
-      "M2/F = 1.3 (1985-1987)" = 8,
-      "Q/Y = 1.7 (1985-1987)" = 8,
-      "M2/F = 17 (2018-2020)" = 8,
-      "Q/Y = 24 (2018-2020)" = 8
-    ),
-    name = "Published in West et al. (2025) — pooled, 8 exploited fish species"
-  ) +
-    
+
     #=======================================================
   # X axis
   #=======================================================
-  
+
   scale_x_continuous(
     breaks = 1:length(period_levels),
     labels = period_levels
   ) +
-    
+
     #=======================================================
   # Facets
   #=======================================================
-  
+
   facet_wrap(
     ~Metric,
     scales = "free_y",
@@ -10464,116 +10831,105 @@ if(exists("ratio_compare") && nrow(ratio_compare) > 0){
   #=======================================================
   
   guides(
-    
-    # NOTE: nrow was 1 (all Models in a single row) until
-    # "qb-30_diet_cod" became the 8th Model entry -- at that point a
-    # single row no longer fit within the panel width and the legend
-    # was clipped on the right edge of the saved PNG. Wrapping to 2
-    # rows (nrow = 2) plus the smaller key/text sizing in theme()
-    # below keeps the full legend inside the plot area.
+
+    # Per request, this legend now matches the companion Pooled
+    # figure's -- a single row (nrow = 1), rather than wrapping onto
+    # two rows, so both figures' legends look the same. Baseline's
+    # key now shows dashed (matching how it's actually drawn in the
+    # plot -- see the "halo" geom_line overlay above), per request,
+    # now that the bigger key size below makes the dash pattern
+    # visible instead of reading as a solid line.
     colour = guide_legend(
       order = 1,
-      nrow = 2,
+      nrow = 1,
       byrow = TRUE,
       override.aes = list(
         shape = 21,
         fill = model_cols,
         size = 2.8,
-        linewidth = 0.8
-      )
-    ),
-    
-    shape = guide_legend(
-      order = 2,
-      nrow = 2,
-      ncol = 2,
-      byrow = TRUE,
-      override.aes = list(
-        shape = 8,
-        colour = "black",
-        size = 3
+        linewidth = 0.8,
+        linetype = ifelse(simulation_order == "baseline", "dashed", "solid")
       )
     )
   )+
-    
+
     #=======================================================
   # Theme
   #=======================================================
-  
+
   theme_bw(
     base_size = 13
   ) +
-    
+
     theme(
-      
+
       #-------------------------------------------------------
       # Square panels
       #-------------------------------------------------------
-      
+
       aspect.ratio = 1,
-      
+
       #-------------------------------------------------------
       # Facet titles
       #-------------------------------------------------------
-      
+
       strip.background = element_blank(),
-      
+
       strip.text = element_text(
         hjust = 0,
         face = "bold",
         size = 16
       ),
-      
+
       #-------------------------------------------------------
       # Axis text
       #-------------------------------------------------------
-      
+
       axis.text.x = element_text(
         angle = 30,
         hjust = 1,
         size = 13
       ),
-      
+
       axis.text.y = element_text(
         size = 13
       ),
-      
+
       #-------------------------------------------------------
       # Axis titles
       #-------------------------------------------------------
-      
+
       axis.title.x = element_text(
         size = 14
       ),
-      
+
       axis.title.y = element_text(
         size = 14
       ),
-      
+
       #-------------------------------------------------------
       # Legends
       #-------------------------------------------------------
-      
+
       legend.position = "bottom",
-      
+
       legend.title = element_text(
         face = "plain",
         size = 11
       ),
-      
-      # Smaller legend text/keys -- the colour legend now carries 8
-      # Model entries (added "qb-30_diet_cod"); shrinking these keeps
-      # 2 rows of 4 comfortably inside the panel width instead of
-      # overflowing past the right edge.
+
+      # Per request, reverted back to the original smaller size --
+      # the bigger version was cutting off the legend. Baseline's
+      # key still shows dashed via the guides() override.aes above.
       legend.text = element_text(
         size = 9
       ),
-      
+
       legend.key.size = unit(
         0.45,
         "cm"
       ),
-      
+
       legend.box = "vertical",
       
       legend.justification = "left",
@@ -10590,23 +10946,18 @@ if(exists("ratio_compare") && nrow(ratio_compare) > 0){
         0,
         0,
         0
-      ),
-      
-      legend.key.width = unit(
-        0.8,
-        "cm"
       )
     )+
-    
+
     labs(
       x = NULL,
       y = ""
     )
-  
+
   #=========================================================
   # Print
   #=========================================================
-  
+
   print(p_d3fig1)
   
   #=========================================================
@@ -10614,8 +10965,9 @@ if(exists("ratio_compare") && nrow(ratio_compare) > 0){
   #=========================================================
   
   p_d3fig1_caption <- paste(
-    "D3 - Fig 1. Cod adult: sensitivity of M2/F and Q/Y to Q/B",
-    "and diet assumptions across three periods. The y axis is",
+    "D3 - Fig 1. Adult cod: sensitivity of M2/F and Q/Y to Q/B",
+    "and diet assumptions across three periods (facets",
+    "\"M2/F (Adult cod)\" and \"Q/Y (Adult cod)\"). The y axis is",
     "shown on a log scale, since values span more than one order",
     "of magnitude between 1985-1987/2013-2015 and 2018-2020; a few",
     "points where F, M2, Q or Y is parameterized as zero (so the",
@@ -10632,13 +10984,16 @@ if(exists("ratio_compare") && nrow(ratio_compare) > 0){
     "line shows the range across the 2018-2020 population-split",
     "scenarios (50/50 and 80/20); at 1985-1987 and 2013-2015,",
     "where only one simulation exists per period, the band",
-    "collapses onto the line. Asterisks represent published",
-    "estimates in West et al. (2025): M2/F = 1.3 and Q/Y = 1.7",
-    "for 1985-1987, and M2/F = 17 and Q/Y = 24 for 2018-2020. These",
-    "are West et al.'s (2025) single pooled, multi-species headline",
-    "estimates, not cod-specific published values; see the report's",
-    "Conclusions for why they are not directly comparable to the",
-    "Cod adult trajectory alone."
+    "collapses onto the line. This panel does not show West et al.'s",
+    "(2025) published value -- it is a single pooled, multi-species",
+    "headline estimate, not a cod-specific published value, so it is",
+    "not shown here. The companion figure",
+    "\"D3_Fig1_Pooled_QBSensitivityTrend\" (facets \"M2/F (Pooled)\"",
+    "and \"Q/Y (Pooled)\") shows the pooled, across-species",
+    "counterpart that IS directly comparable to that published",
+    "value, shown there as a black asterisk, the same published-value",
+    "marker convention used elsewhere in this report. Both figures",
+    "share the same single-row \"Simulations\" legend layout."
   )
   
   cat(
@@ -10743,175 +11098,154 @@ if(exists("ratio_compare") && nrow(ratio_compare) > 0){
       stroke = 0.45
     ) +
     
-    # Published estimates drawn last so the asterisks stay on top
-    # of the simulation lines/points -- see the matching fix in
-    # D3 Fig 1 above.
-    geom_point(
-      data = qb_published,
-      aes(
-        x = as.numeric(Period),
-        y = Ratio,
-        shape = Published
-      ),
-      colour = "black",
-      size = 3,
-      stroke = 0.8,
-      inherit.aes = FALSE
-    ) +
-    
+    # Per request, this Cod-adult-only panel no longer shows West et
+    # al.'s (2025) published value -- see the matching note on D3
+    # Fig 1 (log-scale) above.
+
     scale_colour_manual(
       values = model_cols,
       breaks = simulation_order,
       labels = simulation_order,
       name = "Simulations"
     ) +
-    
+
     scale_fill_manual(
       values = model_cols,
       breaks = simulation_order,
       guide = "none"
     ) +
-    
-    scale_shape_manual(
-      values = c(
-        "M2/F = 1.3 (1985-1987)" = 8,
-        "Q/Y = 1.7 (1985-1987)" = 8,
-        "M2/F = 17 (2018-2020)" = 8,
-        "Q/Y = 24 (2018-2020)" = 8
-      ),
-      name = "Published in West et al. (2025) — pooled, 8 exploited fish species"
-    ) +
-    
+
     scale_x_continuous(
       breaks = 1:length(period_levels),
       labels = period_levels
     ) +
-    
+
     facet_wrap(
       ~Metric,
       scales = "free_y",
       ncol = 2
     ) +
-    
+
     # No scale_y_log10() here -- plain linear axis, unlike D3 Fig 1
     # above. Zero-mortality points (F or M2 parameterized as zero)
     # remain visible on this scale instead of being dropped as
     # non-finite, unlike on the log10 version.
-    
+
     guides(
-      
-      # See the matching note in D3 Fig 1 above: nrow = 2 (was 1)
-      # keeps all 8 Model entries (now including "qb-30_diet_cod")
-      # from overflowing past the right edge of the saved PNG.
+
+      # Per request, a single row (nrow = 1), matching the log-scale
+      # D3 Fig 1 and Pooled companion figures. Baseline's key shows
+      # dashed, matching how it's actually drawn in the plot.
       colour = guide_legend(
         order = 1,
-        nrow = 2,
+        nrow = 1,
         byrow = TRUE,
         override.aes = list(
           shape = 21,
           fill = model_cols,
           size = 2.8,
-          linewidth = 0.8
-        )
-      ),
-      
-      shape = guide_legend(
-        order = 2,
-        nrow = 2,
-        ncol = 2,
-        byrow = TRUE,
-        override.aes = list(
-          shape = 8,
-          colour = "black",
-          size = 3
+          linewidth = 0.8,
+          linetype = ifelse(simulation_order == "baseline", "dashed", "solid")
         )
       )
     )+
-    
+
     theme_bw(
       base_size = 13
     ) +
-    
+
     theme(
-      
+
       aspect.ratio = 1,
-      
+
       strip.background = element_blank(),
-      
+
       strip.text = element_text(
         hjust = 0,
         face = "bold",
         size = 16
       ),
-      
+
       axis.text.x = element_text(
         angle = 30,
         hjust = 1,
         size = 13
       ),
-      
+
       axis.text.y = element_text(
         size = 13
       ),
-      
+
       axis.title.x = element_text(
         size = 14
       ),
-      
+
       axis.title.y = element_text(
         size = 14
       ),
-      
+
       legend.position = "bottom",
-      
+
       legend.title = element_text(
         face = "plain",
         size = 11
       ),
-      
+
+      # Per request, reverted back to the original smaller size --
+      # see the matching comment on the log-scale D3 Fig 1 above.
+      # Baseline's key still shows dashed via the guides()
+      # override.aes above.
       legend.text = element_text(
         size = 9
       ),
-      
+
       legend.key.size = unit(
         0.45,
         "cm"
       ),
-      
+
+      # Per request: text/key height stay small (that's what was
+      # getting cut off before), but the key needs to be WIDER than
+      # it is tall for a dashed line to actually show as a dash
+      # inside it -- a near-square key just shows a short, solid-
+      # looking segment. Widening only legend.key.width (not
+      # legend.key.size, which sets both dimensions) keeps the
+      # overall legend compact while making baseline's dash visible.
+      legend.key.width = unit(
+        1,
+        "cm"
+      ),
+
       legend.box = "vertical",
-      
+
       legend.justification = "left",
-      
+
       legend.box.just = "left",
-      
+
       legend.spacing.y = unit(
         0,
         "cm"
       ),
-      
+
       legend.margin = margin(
         0,
         0,
         0,
         0
-      ),
-      
-      legend.key.width = unit(
-        0.8,
-        "cm"
       )
     )+
-    
+
     labs(
       x = NULL,
       y = ""
     )
-  
+
   print(p_d3fig1_ratio)
-  
+
   p_d3fig1_ratio_caption <- paste(
-    "D3 - Fig 1b. Cod adult: sensitivity of M2/F and Q/Y to Q/B",
-    "and diet assumptions across three periods, on the original",
+    "D3 - Fig 1b. Adult cod: sensitivity of M2/F and Q/Y to Q/B",
+    "and diet assumptions across three periods (facets",
+    "\"M2/F (Adult cod)\" and \"Q/Y (Adult cod)\"), on the original",
     "(untransformed) ratio scale -- the same figure as D3 - Fig 1",
     "above, without the log10 transform. Panels use independent",
     "y-axis ranges (scales = \"free_y\"), so the 2018-2020 values",
@@ -10919,17 +11253,19 @@ if(exists("ratio_compare") && nrow(ratio_compare) > 0){
     "shared linear axis would, but the relative change across",
     "periods is harder to read here than on the log-scale version",
     "when values span multiple orders of magnitude. All other",
-    "elements (baseline overlay, uncertainty band, colours,",
-    "published asterisks) are identical to D3 - Fig 1."
+    "elements (baseline overlay, uncertainty band, colours) are",
+    "identical to D3 - Fig 1; neither panel shows West et al.'s",
+    "(2025) published value -- see the companion Pooled figure for",
+    "that."
   )
-  
+
   cat(
     "\n",
     p_d3fig1_ratio_caption,
     "\n",
     sep = ""
   )
-  
+
   ggsave(
     file.path(
       output_dir,
@@ -10941,34 +11277,497 @@ if(exists("ratio_compare") && nrow(ratio_compare) > 0){
     dpi = 300
   )
 
-  #---------------------------------------------------------
-  # Second version, without West et al.'s (2025) published
-  # Cod-adult headline markers (per review feedback: those markers
-  # are a single repeated reference value, not a per-FG published
-  # estimate, and this is the only layer to drop). Non-destructive:
-  # copies the finished plot and removes just its last geom layer,
-  # which the "Published estimates" geom_point above is guaranteed
-  # to be (it is added last, specifically so it stays on top of the
-  # other layers -- see the FIXED note above it).
-  #---------------------------------------------------------
-  p_d3fig1_ratio_noref <- p_d3fig1_ratio
-  p_d3fig1_ratio_noref$layers[[length(p_d3fig1_ratio_noref$layers)]] <- NULL
+  #=========================================================
+  # D3 - Figure 1, Pooled companion
+  # Separate figure: the sensitivity variants' POOLED ratio across
+  # the assumed shared 6-species set, directly comparable to West et
+  # al.'s (2025) published pooled headline estimate (unlike the
+  # Cod-adult-only figure above it). Built from qb_pooled_line /
+  # qb_published_pooled (constructed earlier, before the Cod-adult
+  # plot). Does not include "alternative" (shown as a table instead,
+  # per request) or "qb-30_diet_cod" (removed from simulation_order
+  # above).
+  #=========================================================
+  if(!is.null(qb_pooled_line) && nrow(qb_pooled_line) > 0){
 
-  ggsave(
-    file.path(
-      output_dir,
-      "D3_Fig1_QBSensitivityTrend_CodAdult_RatioScale_NoWestReference.png"
-    ),
-    p_d3fig1_ratio_noref,
-    width = 10,
-    height = 8,
-    dpi = 300
-  )
-  
+    p_d3fig1_pooled <- ggplot(
+      qb_pooled_line,
+      aes(
+        x = PeriodNum,
+        y = Value,
+        colour = Model,
+        group = Model
+      )
+    ) +
+
+      # Published pooled value, as a black asterisk with its own
+      # legend entry. Per request, switched from a dashed reference
+      # line (which was still hard to pick out against the Model
+      # colour gradient even widened with a white halo) to the same
+      # asterisk marker convention used for published values
+      # elsewhere in this report -- a fixed black shape doesn't
+      # depend on being able to tell one line colour from another at
+      # all, so it stays legible regardless of which Model colour it
+      # happens to land on. Drawn FIRST (underneath the ribbon/lines/
+      # mean points), per request, so it reads as a background
+      # reference rather than sitting on top of and partly obscuring
+      # the simulation data; sized down a bit accordingly.
+      geom_point(
+        data = qb_published_pooled,
+        aes(
+          x = PeriodNum,
+          y = Ratio,
+          shape = "West et al. (2025) published"
+        ),
+        colour = "black",
+        size = 4.5,
+        stroke = 1.2,
+        inherit.aes = FALSE
+      ) +
+
+      geom_ribbon(
+        aes(
+          ymin = ymin,
+          ymax = ymax,
+          fill = Model,
+          group = Model
+        ),
+        colour = NA,
+        alpha = 0.22
+      ) +
+
+      geom_line(
+        linewidth = 0.75
+      ) +
+
+      geom_line(
+        data = qb_pooled_line[Model == "baseline"],
+        linewidth = 2.6,
+        colour = "white",
+        alpha = 0.6
+      ) +
+
+      geom_line(
+        data = qb_pooled_line[Model == "baseline"],
+        linewidth = 1.3,
+        colour = "black",
+        linetype = "dashed"
+      ) +
+
+      geom_point(
+        aes(
+          fill = Model
+        ),
+        shape = 21,
+        colour = "black",
+        size = 2.8,
+        stroke = 0.45
+      ) +
+
+      scale_shape_manual(
+        name = NULL,
+        values = c("West et al. (2025) published" = 8)
+      ) +
+
+      scale_colour_manual(
+        values = model_cols,
+        breaks = simulation_order,
+        labels = simulation_order,
+        name = "Simulations"
+      ) +
+
+      scale_fill_manual(
+        values = model_cols,
+        breaks = simulation_order,
+        guide = "none"
+      ) +
+
+      scale_x_continuous(
+        breaks = 1:length(period_levels),
+        labels = period_levels
+      ) +
+
+      scale_y_log10() +
+
+      facet_wrap(
+        ~Metric,
+        scales = "free_y",
+        ncol = 2
+      ) +
+
+      guides(
+        # Baseline's key shows dashed, matching how it's actually
+        # drawn in the plot, now that the bigger key size below makes
+        # the dash pattern visible.
+        colour = guide_legend(
+          order = 1,
+          nrow = 1,
+          byrow = TRUE,
+          override.aes = list(
+            shape = 21,
+            fill = model_cols,
+            size = 2.8,
+            linewidth = 0.8,
+            linetype = ifelse(simulation_order == "baseline", "dashed", "solid")
+          )
+        ),
+        shape = guide_legend(
+          order = 2,
+          override.aes = list(
+            colour = "black",
+            size = 4.5,
+            stroke = 1.2
+          )
+        )
+      ) +
+
+      theme_bw(
+        base_size = 13
+      ) +
+
+      theme(
+        aspect.ratio = 1,
+        strip.background = element_blank(),
+        strip.text = element_text(
+          hjust = 0,
+          face = "bold",
+          size = 16
+        ),
+        axis.text.x = element_text(
+          angle = 30,
+          hjust = 1,
+          size = 13
+        ),
+        axis.text.y = element_text(
+          size = 13
+        ),
+        axis.title.x = element_text(
+          size = 14
+        ),
+        axis.title.y = element_text(
+          size = 14
+        ),
+        legend.position = "bottom",
+        legend.title = element_text(
+          face = "plain",
+          size = 11
+        ),
+        # Per request, reverted back to the original smaller size --
+        # see the matching comment on the log-scale D3 Fig 1 above.
+        # Baseline's key still shows dashed via the guides()
+        # override.aes above.
+        legend.text = element_text(
+          size = 9
+        ),
+        legend.key.size = unit(
+          0.45,
+          "cm"
+        ),
+        # Per request, matches the companion Cod-adult figure's legend
+        # layout exactly, so both figures' legends look the same.
+        legend.box = "vertical",
+        legend.justification = "left",
+        legend.box.just = "left",
+        legend.spacing.y = unit(
+          0,
+          "cm"
+        ),
+        legend.margin = margin(
+          0,
+          0,
+          0,
+          0
+        )
+      ) +
+
+      labs(
+        x = NULL,
+        y = "Pooled ratio (log scale)"
+      )
+
+    print(p_d3fig1_pooled)
+
+    p_d3fig1_pooled_caption <- paste(
+      "D3 - Fig 1, Pooled companion. The same Q/B and diet",
+      "sensitivity variants as D3 - Fig 1 (Adult cod), but POOLED",
+      "across the assumed shared 6-species set (summed numerator /",
+      "summed denominator, matching West et al.'s (2025) own stated",
+      "method) rather than Cod adult alone -- facet titles",
+      "\"M2/F (Pooled)\" and \"Q/Y (Pooled)\" mirror D3 - Fig 1's own",
+      "\"M2/F (Adult cod)\" and \"Q/Y (Adult cod)\" titles, so the two",
+      "figures read as a matched pair. This panel is directly",
+      "comparable to West et al.'s (2025) published pooled headline",
+      "estimate, shown as a black asterisk at each period with a",
+      "published estimate (no 2013-2015 Q/Y value was published) --",
+      "the same marker convention used for published values",
+      "elsewhere in this report, switched to from an earlier dashed-",
+      "line version that was hard to distinguish from the Model",
+      "colour gradient. The 2018-2020-only exploratory \"alternative\"",
+      "scenario is not shown here (see the accompanying table",
+      "instead). All other conventions (baseline overlay, uncertainty",
+      "band, colours, log y axis, single-row legend) match D3 - Fig 1."
+    )
+
+    cat(
+      "\n",
+      p_d3fig1_pooled_caption,
+      "\n",
+      sep = ""
+    )
+
+    ggsave(
+      file.path(
+        output_dir,
+        "D3_Fig1_Pooled_QBSensitivityTrend.png"
+      ),
+      p_d3fig1_pooled,
+      width = 10,
+      height = 6,
+      dpi = 300
+    )
+
+    fwrite(
+      qb_pooled_line,
+      file.path(output_dir, "D3_Fig1_Pooled_Estimates_PeriodMeans.csv")
+    )
+
+    #=========================================================
+    # D3 - Figure 1, Pooled companion, ratio scale
+    # Same as the Pooled companion above, on the original
+    # (untransformed) ratio scale -- no log10 transform. Mirrors
+    # how p_d3fig1_ratio relates to p_d3fig1: same data, same
+    # colours, same baseline overlay, same published-value
+    # asterisk, same facets and single-row legend; the only
+    # difference is the absence of scale_y_log10() below. Per
+    # request, matches p_d3fig1_ratio's structure exactly so the
+    # Cod-adult and Pooled ratio-scale figures read as a pair.
+    #=========================================================
+
+    p_d3fig1_pooled_ratio <- ggplot(
+      qb_pooled_line,
+      aes(
+        x = PeriodNum,
+        y = Value,
+        colour = Model,
+        group = Model
+      )
+    ) +
+
+      geom_point(
+        data = qb_published_pooled,
+        aes(
+          x = PeriodNum,
+          y = Ratio,
+          shape = "West et al. (2025) published"
+        ),
+        colour = "black",
+        size = 4.5,
+        stroke = 1.2,
+        inherit.aes = FALSE
+      ) +
+
+      geom_ribbon(
+        aes(
+          ymin = ymin,
+          ymax = ymax,
+          fill = Model,
+          group = Model
+        ),
+        colour = NA,
+        alpha = 0.22
+      ) +
+
+      geom_line(
+        linewidth = 0.75
+      ) +
+
+      geom_line(
+        data = qb_pooled_line[Model == "baseline"],
+        linewidth = 2.6,
+        colour = "white",
+        alpha = 0.6
+      ) +
+
+      geom_line(
+        data = qb_pooled_line[Model == "baseline"],
+        linewidth = 1.3,
+        colour = "black",
+        linetype = "dashed"
+      ) +
+
+      geom_point(
+        aes(
+          fill = Model
+        ),
+        shape = 21,
+        colour = "black",
+        size = 2.8,
+        stroke = 0.45
+      ) +
+
+      scale_shape_manual(
+        name = NULL,
+        values = c("West et al. (2025) published" = 8)
+      ) +
+
+      scale_colour_manual(
+        values = model_cols,
+        breaks = simulation_order,
+        labels = simulation_order,
+        name = "Simulations"
+      ) +
+
+      scale_fill_manual(
+        values = model_cols,
+        breaks = simulation_order,
+        guide = "none"
+      ) +
+
+      scale_x_continuous(
+        breaks = 1:length(period_levels),
+        labels = period_levels
+      ) +
+
+      # No scale_y_log10() here -- plain linear axis, unlike the
+      # Pooled companion above.
+
+      facet_wrap(
+        ~Metric,
+        scales = "free_y",
+        ncol = 2
+      ) +
+
+      guides(
+        colour = guide_legend(
+          order = 1,
+          nrow = 1,
+          byrow = TRUE,
+          override.aes = list(
+            shape = 21,
+            fill = model_cols,
+            size = 2.8,
+            linewidth = 0.8,
+            linetype = ifelse(simulation_order == "baseline", "dashed", "solid")
+          )
+        ),
+        shape = guide_legend(
+          order = 2,
+          override.aes = list(
+            colour = "black",
+            size = 4.5,
+            stroke = 1.2
+          )
+        )
+      ) +
+
+      theme_bw(
+        base_size = 13
+      ) +
+
+      theme(
+        aspect.ratio = 1,
+        strip.background = element_blank(),
+        strip.text = element_text(
+          hjust = 0,
+          face = "bold",
+          size = 16
+        ),
+        axis.text.x = element_text(
+          angle = 30,
+          hjust = 1,
+          size = 13
+        ),
+        axis.text.y = element_text(
+          size = 13
+        ),
+        # Per request: drop the x-axis title entirely (labs(x = NULL)
+        # below already blanks the text, but this also removes the
+        # reserved space for it).
+        axis.title.x = element_blank(),
+        axis.title.y = element_text(
+          size = 14
+        ),
+        legend.position = "bottom",
+        legend.title = element_text(
+          face = "plain",
+          size = 11
+        ),
+        legend.text = element_text(
+          size = 9
+        ),
+        legend.key.size = unit(
+          0.45,
+          "cm"
+        ),
+        # Same fix as p_d3fig1_ratio: widen only the key width so
+        # baseline's dashed key actually shows as a dash.
+        legend.key.width = unit(
+          1,
+          "cm"
+        ),
+        legend.box = "vertical",
+        legend.justification = "left",
+        legend.box.just = "left",
+        # Per request, a bit more breathing room between the
+        # "Simulations" row and the "West et al. (2025) published"
+        # row below it (was 0cm, flush against each other).
+        legend.spacing.y = unit(
+          0.25,
+          "cm"
+        ),
+        legend.margin = margin(
+          0,
+          0,
+          0,
+          0
+        )
+      ) +
+
+      labs(
+        x = NULL,
+        y = "Pooled ratio"
+      )
+
+    print(p_d3fig1_pooled_ratio)
+
+    p_d3fig1_pooled_ratio_caption <- paste(
+      "D3 - Fig 1, Pooled companion, ratio scale. The same figure",
+      "as the Pooled companion above, on the original",
+      "(untransformed) ratio scale -- the same figure, without the",
+      "log10 transform, mirroring how D3 - Fig 1b (ratio scale)",
+      "relates to D3 - Fig 1 for Cod adult. Panels use independent",
+      "y-axis ranges (scales = \"free_y\"). All other elements",
+      "(baseline overlay, uncertainty band, colours, published-value",
+      "asterisk, single-row legend) are identical to the log-scale",
+      "Pooled companion figure."
+    )
+
+    cat(
+      "\n",
+      p_d3fig1_pooled_ratio_caption,
+      "\n",
+      sep = ""
+    )
+
+    ggsave(
+      file.path(
+        output_dir,
+        "D3_Fig1_Pooled_QBSensitivityTrend_RatioScale.png"
+      ),
+      p_d3fig1_pooled_ratio,
+      width = 10,
+      height = 6,
+      dpi = 300
+    )
+
+  } else {
+    cat("\nD3 Fig 1 Pooled companion -- qb_pooled_line not available, skipping.\n")
+  }
+
 } else {
-  
+
   cat("\nSkipping Figure D3-1 -- `ratio_compare` isn't available.\n")
-  
+
 }
 
 
@@ -11025,8 +11824,7 @@ simulation_order <- c(
   "qb+15",
   "qb+30",
   "diet-20",
-  "diet-20pisciv",
-  "qb-30_diet_cod"
+  "diet-20pisciv"
 )
 
 
@@ -11217,59 +12015,15 @@ multi_period_data$raw_points[
 ]
 
 
-#=========================================================
-# Published estimates
-# West et al. (2025)
-#
-# Currently available published values are for Cod adult.
-#=========================================================
-
-## NOTE: no `Group` column here, deliberately. West et al. (2025) only
-## published these four headline ratios for Cod adult -- there is no
-## per-FG published dataset anywhere in this script (checked). Per
-## review feedback, these headline values are shown as a common
-## reference in every facet of D3 Fig 2/3, not as a claim that each
-## FG has its own published estimate -- omitting the `Group` column
-## is what makes ggplot replicate this layer across every panel of
-## `facet_wrap(~Group)` instead of only the Cod adult one (a layer
-## whose data lacks the facetting variable is drawn in every panel).
-## If per-FG published values become available later, add a `Group`
-## column back and this will revert to per-panel matching instead.
-
-qb_published <- data.table(
-  
-  Period = factor(
-    c(
-      "1985-1987",
-      "1985-1987",
-      "2018-2020",
-      "2018-2020"
-    ),
-    levels = period_levels
-  ),
-  
-  Ratio = c(
-    1.3,
-    1.7,
-    17,
-    24
-  ),
-  
-  Metric = c(
-    "M2_over_F",
-    "Q_over_Y",
-    "M2_over_F",
-    "Q_over_Y"
-  ),
-  
-  Published = c(
-    "M2/F = 1.3 (1985-1987)",
-    "Q/Y = 1.7 (1985-1987)",
-    "M2/F = 17 (2018-2020)",
-    "Q/Y = 24 (2018-2020)"
-  )
-)
-
+## Per request: D3 Fig 2/3 no longer show West et al.'s (2025)
+## published value AT ALL -- not as a per-FG asterisk (already removed
+## in the previous round) and not as a Pooled-facet reference line
+## either, since the Pooled facet itself is removed from these two
+## figures (see below). The published-vs-pooled comparison now lives
+## only in the restructured D3 Fig 1 pair (Cod-adult and Pooled, each
+## its own figure) and the standalone sensitivity figure. `qb_published`
+## and its M2/F-/Q-Y-specific slices (`m2f_published`/`qy_published`)
+## are therefore no longer needed here and have been removed.
 
 #=========================================================
 # Model colours
@@ -11303,13 +12057,7 @@ model_cols <- c(
   #-------------------------------------------------------
   
   "diet-20" = "#FDD49E",
-  "diet-20pisciv" = "#E66101",
-  
-  #-------------------------------------------------------
-  # Combined Q/B-30% + cod diet exploratory run
-  #-------------------------------------------------------
-  
-  "qb-30_diet_cod" = "#bf812d"
+  "diet-20pisciv" = "#E66101"
 )
 
 
@@ -11338,10 +12086,6 @@ m2f_data[
 ]
 
 m2f_raw <- multi_period_data$raw_points[
-  Metric == "M2_over_F"
-]
-
-m2f_published <- qb_published[
   Metric == "M2_over_F"
 ]
 
@@ -11377,6 +12121,14 @@ m2f_range[is.na(ymin), ymin := Value]
 m2f_range[is.na(ymax), ymax := Value]
 
 
+## Per request, D3 Fig 2 no longer has a "Pooled" facet at all -- the
+## grid below is species-only (true 5 x N, matching the ~25 facets in
+## the report). The pooled-vs-published comparison is shown only in
+## the restructured D3 Fig 1 Pooled figure and the standalone
+## sensitivity figure, which both read from the same
+## `west_published_comparison` source, so they stay in agreement with
+## each other even though that comparison is no longer repeated here.
+
 #=========================================================
 # Plot log(ratio + 1) directly, not via a scale transform
 #=========================================================
@@ -11402,7 +12154,6 @@ m2f_range[, `:=`(
   yminPlot = log1p(ymin),
   ymaxPlot = log1p(ymax)
 )]
-m2f_published[, RatioPlot := log1p(Ratio)]
 
 
 #=========================================================
@@ -11493,27 +12244,12 @@ geom_point(
 ) +
   
   #-------------------------------------------------------
-# 4. Published estimates
-# FIXED: moved from layer 2 to last -- drawn earlier, the
-# asterisk markers could be hidden under a simulation trend line,
-# the baseline overlay, or a mean-estimate point landing at the
-# same spot. Drawing them last puts the published-value asterisks
-# on top of every other layer, so they stay visible.
+# Per request, D3 Fig 2 shows no West et al. (2025) published
+# reference at all now (no asterisk, no Pooled-facet line) -- see
+# D3 Fig 1's restructured Pooled companion figure and the standalone
+# sensitivity figure for that comparison.
 #-------------------------------------------------------
 
-geom_point(
-  data = m2f_published,
-  aes(
-    x = as.numeric(Period),
-    y = RatioPlot,
-    shape = Published
-  ),
-  colour = "black",
-  size = 3,
-  stroke = 0.8,
-  inherit.aes = FALSE
-) +
-  
   #=======================================================
 # Simulation colours
 #=======================================================
@@ -11524,25 +12260,13 @@ scale_colour_manual(
   labels = simulation_order,
   name = "Simulations"
 ) +
-  
+
   scale_fill_manual(
     values = model_cols,
     breaks = simulation_order,
     guide = "none"
   ) +
-  
-  #=======================================================
-# Published estimates legend
-#=======================================================
 
-scale_shape_manual(
-  values = c(
-    "M2/F = 1.3 (1985-1987)" = 8,
-    "M2/F = 17 (2018-2020)" = 8
-  ),
-  name = "Published in West et al. (2025) — pooled, 8 exploited fish species"
-) +
-  
   #=======================================================
 # X axis
 #=======================================================
@@ -11551,24 +12275,28 @@ scale_x_continuous(
   breaks = 1:length(period_levels),
   labels = period_levels
 ) +
-  
+
   #=======================================================
-# 5 x 5 facet layout
+# Facet layout -- species/FG only, true ncol = 5 grid (no
+# added "Pooled" panel, per request)
 #=======================================================
 
 facet_wrap(
   ~Group,
   scales = "free_y",
-  ncol = 5,
-  nrow = 5
+  ncol = 5
 ) +
-  
+
   #=======================================================
 # Legends
 #=======================================================
 
 guides(
-  
+
+  # Baseline's key shows dashed, matching how it's actually drawn in
+  # the plot, now that the bigger legend key size below (see the
+  # theme() override after common_theme) makes the dash pattern
+  # visible instead of reading as solid.
   colour = guide_legend(
     order = 1,
     nrow = 1,
@@ -11577,22 +12305,12 @@ guides(
       shape = 21,
       fill = model_cols,
       size = 2.8,
-      linewidth = 0.8
-    )
-  ),
-  
-  shape = guide_legend(
-    order = 2,
-    nrow = 1,
-    byrow = TRUE,
-    override.aes = list(
-      shape = 8,
-      colour = "black",
-      size = 3
+      linewidth = 0.8,
+      linetype = ifelse(simulation_order == "baseline", "dashed", "solid")
     )
   )
 ) +
-  
+
   #=======================================================
 # No scale transform here -- the data itself is already
 # log(ratio + 1) (see the block right before this plot's
@@ -11608,7 +12326,17 @@ guides(
 #=======================================================
 
 common_theme +
-  
+
+  # Per request, bigger legend than `common_theme`'s default --
+  # large enough that baseline's dashed key reads as dashed. Local
+  # override only (not changed in `common_theme` itself, which is
+  # shared with D4 Fig 1/5).
+  theme(
+    legend.text = element_text(size = 13),
+    legend.key.size = unit(0.8, "cm"),
+    legend.key.width = unit(1.3, "cm")
+  ) +
+
   labs(
     x = NULL,
     y = "log(M2/F + 1)"
@@ -11639,10 +12367,6 @@ qy_raw <- multi_period_data$raw_points[
   Metric == "Q_over_Y"
 ]
 
-qy_published <- qb_published[
-  Metric == "Q_over_Y"
-]
-
 ## Uncertainty band -- see the matching comment on m2f_range above.
 
 qy_raw_range <- qy_raw[
@@ -11665,6 +12389,9 @@ qy_range[is.na(ymin), ymin := Value]
 qy_range[is.na(ymax), ymax := Value]
 
 
+## Per request, D3 Fig 3 no longer has a "Pooled" facet either -- see
+## the matching comment on D3 Fig 2 (M2/F) above.
+
 #=========================================================
 # Plot log(ratio + 1) directly, not via a scale transform
 # (see the matching comment in the M2/F plot above -- new
@@ -11677,7 +12404,6 @@ qy_range[, `:=`(
   yminPlot = log1p(ymin),
   ymaxPlot = log1p(ymax)
 )]
-qy_published[, RatioPlot := log1p(Ratio)]
 
 
 #=========================================================
@@ -11756,27 +12482,10 @@ geom_point(
 ) +
   
   #-------------------------------------------------------
-# 4. Published estimates
-# FIXED: moved from layer 2 to last -- drawn earlier, the
-# asterisk markers could be hidden under a simulation trend line,
-# the baseline overlay, or a mean-estimate point landing at the
-# same spot. Drawing them last puts the published-value asterisks
-# on top of every other layer, so they stay visible.
+# Per request, no West et al. (2025) published reference shown in
+# D3 Fig 3 either -- see the matching comment on the M2/F plot above.
 #-------------------------------------------------------
 
-geom_point(
-  data = qy_published,
-  aes(
-    x = as.numeric(Period),
-    y = RatioPlot,
-    shape = Published
-  ),
-  colour = "black",
-  size = 3,
-  stroke = 0.8,
-  inherit.aes = FALSE
-) +
-  
   #=======================================================
 # Simulation colours
 #=======================================================
@@ -11787,25 +12496,13 @@ scale_colour_manual(
   labels = simulation_order,
   name = "Simulations"
 ) +
-  
+
   scale_fill_manual(
     values = model_cols,
     breaks = simulation_order,
     guide = "none"
   ) +
-  
-  #=======================================================
-# Published estimates legend
-#=======================================================
 
-scale_shape_manual(
-  values = c(
-    "Q/Y = 1.7 (1985-1987)" = 8,
-    "Q/Y = 24 (2018-2020)" = 8
-  ),
-  name = "Published in West et al. (2025) — pooled, 8 exploited fish species"
-) +
-  
   #=======================================================
 # X axis
 #=======================================================
@@ -11814,24 +12511,24 @@ scale_x_continuous(
   breaks = 1:length(period_levels),
   labels = period_levels
 ) +
-  
+
   #=======================================================
-# 5 x 5 facet layout
+# Facet layout -- species/FG only, true ncol = 5 grid (no
+# added "Pooled" panel, per request)
 #=======================================================
 
 facet_wrap(
   ~Group,
   scales = "free_y",
-  ncol = 5,
-  nrow = 5
+  ncol = 5
 ) +
-  
+
   #=======================================================
 # Legends
 #=======================================================
 
 guides(
-  
+
   colour = guide_legend(
     order = 1,
     nrow = 1,
@@ -11840,22 +12537,12 @@ guides(
       shape = 21,
       fill = model_cols,
       size = 2.8,
-      linewidth = 0.8
-    )
-  ),
-  
-  shape = guide_legend(
-    order = 2,
-    nrow = 1,
-    byrow = TRUE,
-    override.aes = list(
-      shape = 8,
-      colour = "black",
-      size = 3
+      linewidth = 0.8,
+      linetype = ifelse(simulation_order == "baseline", "dashed", "solid")
     )
   )
 ) +
-  
+
   #=======================================================
 # No scale transform -- see the matching comment in the M2/F
 # plot above. The data is already log(ratio + 1); this is a
@@ -11863,7 +12550,15 @@ guides(
 #=======================================================
 
 common_theme +
-  
+
+  # Per request, bigger legend than `common_theme`'s default -- see
+  # the matching comment on the M2/F plot above.
+  theme(
+    legend.text = element_text(size = 13),
+    legend.key.size = unit(0.8, "cm"),
+    legend.key.width = unit(1.3, "cm")
+  ) +
+
   labs(
     x = NULL,
     y = "log(Q/Y + 1)"
@@ -11900,24 +12595,9 @@ ggsave(
   dpi = 300
 )
 
-#---------------------------------------------------------
-# Second version, without West et al.'s (2025) published Cod-adult
-# headline markers (same rationale as D3 Fig 1 above: this is a
-# single repeated reference value, not a per-FG published estimate).
-#---------------------------------------------------------
-p_m2f_noref <- p_m2f
-p_m2f_noref$layers[[length(p_m2f_noref$layers)]] <- NULL
-
-ggsave(
-  file.path(
-    output_dir,
-    "D3_Fig2_M2F_MultipleGroups_NoWestReference.png"
-  ),
-  p_m2f_noref,
-  width = fig_width,
-  height = fig_height,
-  dpi = 300
-)
+## Per request, D3 Fig 2 no longer shows any West et al. (2025)
+## published reference, so the separate "_NoWestReference" variant is
+## now identical to the main plot and has been removed.
 
 #=========================================================
 # Estimates table (companion to D3 Fig 2)
@@ -11944,23 +12624,9 @@ ggsave(
   dpi = 300
 )
 
-#---------------------------------------------------------
-# Second version, without West et al.'s (2025) published Cod-adult
-# headline markers (same rationale as D3 Fig 1 above).
-#---------------------------------------------------------
-p_qy_noref <- p_qy
-p_qy_noref$layers[[length(p_qy_noref$layers)]] <- NULL
-
-ggsave(
-  file.path(
-    output_dir,
-    "D3_Fig3_QY_MultipleGroups_NoWestReference.png"
-  ),
-  p_qy_noref,
-  width = fig_width,
-  height = fig_height,
-  dpi = 300
-)
+## Per request, D3 Fig 3 no longer shows any West et al. (2025)
+## published reference either, so its "_NoWestReference" variant has
+## also been removed (now identical to the main plot).
 
 #=========================================================
 # Estimates table (companion to D3 Fig 3)
@@ -11995,13 +12661,12 @@ p_m2f_caption <- paste(
   "shows the range across the 2018-2020 population-split",
   "scenarios (50/50 and 80/20); at 1985-1987 and 2013-2015,",
   "where only one simulation exists per period, the band",
-  "collapses onto the line. Asterisks show West et al.'s (2025)",
-  "published headline ratio, a single pooled estimate averaged",
-  "across multiple species (not a cod-specific or per-FG value),",
-  "repeated identically in every panel as a common reference",
-  "point; West et al. did not report per-FG values, and this",
-  "group average is not weighted by each species' biomass, catch,",
-  "or ecological importance. Where the underlying EwE model",
+  "collapses onto the line. This figure shows only this report's",
+  "own species and simulations -- it does not show West et al.'s",
+  "(2025) published value in any form; see the companion D3 Fig 1",
+  "Pooled figure and the standalone sensitivity figure for how this",
+  "report's pooled baseline and sensitivity estimates compare to",
+  "that published headline ratio. Where the underlying EwE model",
   "parameterized predation (M2) or fishing mortality (F) as",
   "zero for that group and simulation, the ratio is zero and",
   "the point sits at the bottom of the axis rather than being",
@@ -12029,13 +12694,12 @@ p_qy_caption <- paste(
   "shows the range across the 2018-2020 population-split",
   "scenarios (50/50 and 80/20); at 1985-1987 and 2013-2015,",
   "where only one simulation exists per period, the band",
-  "collapses onto the line. Asterisks show West et al.'s (2025)",
-  "published headline ratio, a single pooled estimate averaged",
-  "across multiple species (not a cod-specific or per-FG value),",
-  "repeated identically in every panel as a common reference",
-  "point; West et al. did not report per-FG values, and this",
-  "group average is not weighted by each species' biomass, catch,",
-  "or ecological importance. Where the underlying EwE model",
+  "collapses onto the line. This figure shows only this report's",
+  "own species and simulations -- it does not show West et al.'s",
+  "(2025) published value in any form; see the companion D3 Fig 1",
+  "Pooled figure and the standalone sensitivity figure for how this",
+  "report's pooled baseline and sensitivity estimates compare to",
+  "that published headline ratio. Where the underlying EwE model",
   "parameterized consumption (Q) or yield (Y) as zero for",
   "that group and simulation, the ratio is zero and the point",
   "sits at the bottom of the axis rather than being dropped,",
@@ -12065,10 +12729,9 @@ cat(
 ## Per request: alongside the log(M2/F + 1) / log(Q/Y + 1) figures
 ## above, also produce the same two figures on the original ratio
 ## scale (no transform at all) -- same data, same colours, same
-## baseline overlay, same facets, just y = the real Value/ymin/ymax/
-## Ratio columns (still present on m2f_data/m2f_range/m2f_published
-## and qy_data/qy_range/qy_published; only the *Plot columns above are
-## log-transformed, these were never touched).
+## baseline overlay, same facets, just y = the real Value/ymin/ymax
+## columns (only the *Plot columns above are log-transformed, these
+## were never touched).
 
 p_m2f_ratio <- ggplot(
   m2f_data,
@@ -12122,59 +12785,36 @@ p_m2f_ratio <- ggplot(
     stroke = 0.45
   ) +
   
-  # FIXED: moved from layer 2 (right after the ribbon) to last --
-  # drawn earlier, the asterisk markers could be hidden under a
-  # simulation trend line, the baseline overlay, or a mean-estimate
-  # point landing at the same spot. Drawing them last puts the
-  # published-value asterisks on top of every other layer.
-  geom_point(
-    data = m2f_published,
-    aes(
-      x = as.numeric(Period),
-      y = Ratio,
-      shape = Published
-    ),
-    colour = "black",
-    size = 3,
-    stroke = 0.8,
-    inherit.aes = FALSE
-  ) +
-  
+  # Per request, no West et al. (2025) published reference shown in
+  # the ratio-scale figure either.
   scale_colour_manual(
     values = model_cols,
     breaks = simulation_order,
     labels = simulation_order,
     name = "Simulations"
   ) +
-  
+
   scale_fill_manual(
     values = model_cols,
     breaks = simulation_order,
     guide = "none"
   ) +
-  
-  scale_shape_manual(
-    values = c(
-      "M2/F = 1.3 (1985-1987)" = 8,
-      "M2/F = 17 (2018-2020)" = 8
-    ),
-    name = "Published in West et al. (2025) — pooled, 8 exploited fish species"
-  ) +
-  
+
   scale_x_continuous(
     breaks = 1:length(period_levels),
     labels = period_levels
   ) +
-  
+
+  # Facet layout -- species/FG only, true ncol = 5 grid (no added
+  # "Pooled" panel, per request)
   facet_wrap(
     ~Group,
     scales = "free_y",
-    ncol = 5,
-    nrow = 5
+    ncol = 5
   ) +
-  
+
   guides(
-    
+
     colour = guide_legend(
       order = 1,
       nrow = 1,
@@ -12183,24 +12823,22 @@ p_m2f_ratio <- ggplot(
         shape = 21,
         fill = model_cols,
         size = 2.8,
-        linewidth = 0.8
-      )
-    ),
-    
-    shape = guide_legend(
-      order = 2,
-      nrow = 1,
-      byrow = TRUE,
-      override.aes = list(
-        shape = 8,
-        colour = "black",
-        size = 3
+        linewidth = 0.8,
+        linetype = ifelse(simulation_order == "baseline", "dashed", "solid")
       )
     )
   ) +
-  
+
   common_theme +
-  
+
+  # Per request, bigger legend than `common_theme`'s default -- see
+  # the matching comment on the log-scale M2/F plot above.
+  theme(
+    legend.text = element_text(size = 13),
+    legend.key.size = unit(0.8, "cm"),
+    legend.key.width = unit(1.3, "cm")
+  ) +
+
   labs(
     x = NULL,
     y = "M2 / F"
@@ -12218,7 +12856,8 @@ p_m2f_ratio_caption <- paste(
   "the shape of the trend within a panel spanning multiple orders",
   "of magnitude is harder to read here than on the log(M2/F + 1)",
   "version. All other elements (baseline overlay, uncertainty",
-  "band, colours, published asterisks) are identical to D3 - Fig 2."
+  "band, colours) are identical to D3 - Fig 2; neither figure shows",
+  "West et al.'s (2025) published value."
 )
 
 cat(
@@ -12239,23 +12878,9 @@ ggsave(
   dpi = 300
 )
 
-#---------------------------------------------------------
-# Second version, without West et al.'s (2025) published Cod-adult
-# headline markers (same rationale as D3 Fig 1 above).
-#---------------------------------------------------------
-p_m2f_ratio_noref <- p_m2f_ratio
-p_m2f_ratio_noref$layers[[length(p_m2f_ratio_noref$layers)]] <- NULL
-
-ggsave(
-  file.path(
-    output_dir,
-    "D3_Fig2_M2F_MultipleGroups_RatioScale_NoWestReference.png"
-  ),
-  p_m2f_ratio_noref,
-  width = fig_width,
-  height = fig_height,
-  dpi = 300
-)
+## Per request, no West et al. (2025) published reference is shown
+## here, so the separate "_NoWestReference" variant has been removed
+## (it would now be identical to the main plot).
 
 p_qy_ratio <- ggplot(
   qy_data,
@@ -12309,59 +12934,36 @@ p_qy_ratio <- ggplot(
     stroke = 0.45
   ) +
   
-  # FIXED: moved from layer 2 (right after the ribbon) to last --
-  # drawn earlier, the asterisk markers could be hidden under a
-  # simulation trend line, the baseline overlay, or a mean-estimate
-  # point landing at the same spot. Drawing them last puts the
-  # published-value asterisks on top of every other layer.
-  geom_point(
-    data = qy_published,
-    aes(
-      x = as.numeric(Period),
-      y = Ratio,
-      shape = Published
-    ),
-    colour = "black",
-    size = 3,
-    stroke = 0.8,
-    inherit.aes = FALSE
-  ) +
-  
+  # Per request, no West et al. (2025) published reference shown in
+  # the ratio-scale figure either.
   scale_colour_manual(
     values = model_cols,
     breaks = simulation_order,
     labels = simulation_order,
     name = "Simulations"
   ) +
-  
+
   scale_fill_manual(
     values = model_cols,
     breaks = simulation_order,
     guide = "none"
   ) +
-  
-  scale_shape_manual(
-    values = c(
-      "Q/Y = 1.7 (1985-1987)" = 8,
-      "Q/Y = 24 (2018-2020)" = 8
-    ),
-    name = "Published in West et al. (2025) — pooled, 8 exploited fish species"
-  ) +
-  
+
   scale_x_continuous(
     breaks = 1:length(period_levels),
     labels = period_levels
   ) +
-  
+
+  # Facet layout -- species/FG only, true ncol = 5 grid (no added
+  # "Pooled" panel, per request)
   facet_wrap(
     ~Group,
     scales = "free_y",
-    ncol = 5,
-    nrow = 5
+    ncol = 5
   ) +
-  
+
   guides(
-    
+
     colour = guide_legend(
       order = 1,
       nrow = 1,
@@ -12370,24 +12972,22 @@ p_qy_ratio <- ggplot(
         shape = 21,
         fill = model_cols,
         size = 2.8,
-        linewidth = 0.8
-      )
-    ),
-    
-    shape = guide_legend(
-      order = 2,
-      nrow = 1,
-      byrow = TRUE,
-      override.aes = list(
-        shape = 8,
-        colour = "black",
-        size = 3
+        linewidth = 0.8,
+        linetype = ifelse(simulation_order == "baseline", "dashed", "solid")
       )
     )
   ) +
-  
+
   common_theme +
-  
+
+  # Per request, bigger legend than `common_theme`'s default -- see
+  # the matching comment on the log-scale M2/F plot above.
+  theme(
+    legend.text = element_text(size = 13),
+    legend.key.size = unit(0.8, "cm"),
+    legend.key.width = unit(1.3, "cm")
+  ) +
+
   labs(
     x = NULL,
     y = "Q / Y"
@@ -12405,7 +13005,8 @@ p_qy_ratio_caption <- paste(
   "the shape of the trend within a panel spanning multiple orders",
   "of magnitude is harder to read here than on the log(Q/Y + 1)",
   "version. All other elements (baseline overlay, uncertainty",
-  "band, colours, published asterisks) are identical to D3 - Fig 3."
+  "band, colours) are identical to D3 - Fig 3; neither figure shows",
+  "West et al.'s (2025) published value."
 )
 
 cat(
@@ -12426,23 +13027,9 @@ ggsave(
   dpi = 300
 )
 
-#---------------------------------------------------------
-# Second version, without West et al.'s (2025) published Cod-adult
-# headline markers (same rationale as D3 Fig 1 above).
-#---------------------------------------------------------
-p_qy_ratio_noref <- p_qy_ratio
-p_qy_ratio_noref$layers[[length(p_qy_ratio_noref$layers)]] <- NULL
-
-ggsave(
-  file.path(
-    output_dir,
-    "D3_Fig3_QY_MultipleGroups_RatioScale_NoWestReference.png"
-  ),
-  p_qy_ratio_noref,
-  width = fig_width,
-  height = fig_height,
-  dpi = 300
-)
+## Per request, no West et al. (2025) published reference is shown
+## here either, so the separate "_NoWestReference" variant has been
+## removed (it would now be identical to the main plot).
 
 # #=========================================================
 # # Figure D3-2: biomass sensitivity trend for Cod adult (SOW deliverable 3)
