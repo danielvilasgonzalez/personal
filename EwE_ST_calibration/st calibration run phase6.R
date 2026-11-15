@@ -12,11 +12,12 @@
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 ## ---- PATHS ---------------------------------------------------------------------------------
-RUN       <- "/Users/daniel/Downloads/ga_results/phase6_ga01"      # archive folder of this run
+RUN       <- "/Users/daniel/Work/ST_calibration/phase6_ga01"       # ONE folder: inputs/, output/, results/, sens1/, plots_R/
 LABEL     <- "ga01"
 REPO_DIR  <- "/Users/daniel/Documents/GitHub/personal/EwE_ST_calibration"   # functions + masks
-OLD_BASE  <- "/Users/daniel/Work/ST_calibration"                   # only for maxn/ rasters
-SENS_XLSX <- "/Users/daniel/Downloads/phase6/sens1/LL_rescored.xlsx"
+OLD_BASE  <- "/Users/daniel/Work/ST_calibration"                   # only for maxn/ rasters (shared, top level)
+SENS_XLSX <- file.path(RUN, "sens1", "LL_rescored.xlsx")
+PARVEC    <- file.path(RUN, "results", "parvec_ga01.csv")           # per-parameter GA bounds
 
 FUNCTIONS_PATH <- file.path(REPO_DIR, "st_calibration_functions.R")
 DATA_DIR  <- file.path(RUN, "output/gen30_small")                  # the 370 candidate folders
@@ -79,29 +80,45 @@ group_names <- get_region_output(0L, "Biomass", best_dir, new.env(parent = empty
 
 gag_param_summary <- plot_ga_final_pop_distributions(
   gapop_final = gapop_final, gapop_init = gapop_init, ga_runs = ga_runs, catalog = catalog,
-  group_names = group_names, species_patterns = "gag", facet_ncol = 8,
+  group_names = group_names, species_patterns = "gag", facet_ncol = 8, parvec = PARVEC,
   plots_dir = file.path(PLOTS, "ts"))
 print(gag_param_summary)
 
 redgrp_param_summary <- plot_ga_final_pop_distributions(
   gapop_final = gapop_final, gapop_init = gapop_init, ga_runs = ga_runs, catalog = catalog,
-  group_names = group_names, species_patterns = "red grouper", facet_ncol = 4,
+  group_names = group_names, species_patterns = "red grouper", facet_ncol = 4, parvec = PARVEC,
   plots_dir = file.path(PLOTS, "ts"))
 print(redgrp_param_summary)
+
+# ALL estimated parameters (forced red tide pars, other species' vuls and red tide curves, dispersal,
+# fleet dynamics) -- check that nothing in parvec is missing from the figures
+all_param_summary <- plot_ga_final_pop_distributions(
+  gapop_final = gapop_final, gapop_init = gapop_init, ga_runs = ga_runs, catalog = catalog,
+  group_names = group_names, species_patterns = NULL, facet_ncol = 10, parvec = PARVEC,
+  png_file = "ga_final_pop_distributions_ALL_parameters.png", plots_dir = file.path(PLOTS, "ts"))
+pv <- read.csv(PARVEC, row.names = 1, check.names = FALSE)
+message("parvec: ", nrow(pv), " parameters; in the all-parameter figure: ", nrow(all_param_summary),
+        "; missing: ", paste(setdiff(rownames(pv), all_param_summary$param), collapse = ", "))
+
+# which gag / red grouper parameters were tested in the sensitivity analysis and which were calibrated
+tested_tbl <- plot_tested_vs_calibrated(
+  SENS_XLSX, PARVEC, gapop_init, gapop_final, ga_runs, group_names, catalog = catalog,
+  species_patterns = c("gag", "red grouper"), plots_dir = file.path(PLOTS, "ts"))
+print(table(tested_tbl$type, tested_tbl$status))
 
 # stacked figure for the slides. Panel counts are read from the summaries (the July run had 34
 # vulnerability and 20 env/red-tide/disp panels; this run has different numbers).
 n_pan <- function(x, default) if(is.data.frame(x) && nrow(x) > 0) nrow(x) else default
 vul_summary2 <- plot_ga_final_pop_distributions(
   gapop_final = gapop_final, gapop_init = gapop_init, ga_runs = ga_runs,
-  catalog = catalog, group_names = group_names, species_patterns = "gag",
+  catalog = catalog, group_names = group_names, species_patterns = "gag", parvec = PARVEC,
   types = "vul", facet_ncol = 6, base_size = 20, max_title_chars = 8,
   save_plot = FALSE, plots_dir = file.path(PLOTS, "ts"),
   width = 6 * 3.2, height = ceiling(34 / 6) * 3.2)
 n_vul <- n_pan(vul_summary2, 34)
 envrt_summary2 <- plot_ga_final_pop_distributions(
   gapop_final = gapop_final, gapop_init = gapop_init, ga_runs = ga_runs,
-  catalog = catalog, group_names = group_names, species_patterns = "gag",
+  catalog = catalog, group_names = group_names, species_patterns = "gag", parvec = PARVEC,
   types = c("env", "redtide", "disp"), facet_ncol = 6, base_size = 20, max_title_chars = 8,
   save_plot = FALSE, plots_dir = file.path(PLOTS, "ts"),
   width = 6 * 3.2, height = ceiling(20 / 6) * 3.2)
@@ -125,28 +142,45 @@ diag <- diagnose_candidate_outputs(ga_runs, vars = c("Biomass", "Catch"))
 
 ens_summary <- plot_ga_ensemble(
   obs, ga_runs, init_run_dir = BASE_RUN, vars = c("Biomass", "Catch", "F"),
-  species_patterns = c("gag", "red grouper"), keep_fitness_quantile = 0.9,
+  species_patterns = c("gag", "red grouper"),
   plots_dir = file.path(PLOTS, "ts"))
 print(ens_summary)
 
 facet_aic <- plot_ga_ensemble_faceted(
   obs, ga_runs, init_run_dir = BASE_RUN, vars = c("Biomass", "Catch", "F"),
-  species_patterns = c("gag", "red grouper"), ens_mode = "aic",
-  top_n_prop = ENS_PROP, target_ess = ENS_ESS, plots_dir = file.path(PLOTS, "ts"))
+  species_patterns = c("gag", "red grouper"),
+  ens_mode = "quantile", keep_fitness_quantile = 1,   # ALL last-generation models, coloured by NLL
+  palette = "magma", plots_dir = file.path(PLOTS, "ts"))     # + baseline + best only (no grey mean)
 print(facet_aic)
 
-# regions + WFS panel for gag age 0, ensemble with the baseline as a black dashed line
+# best model vs AIC-weighted ensemble mean (is the mean similar to the best model?)
+facet_aic_mean <- plot_ga_ensemble_faceted(
+  obs, ga_runs, init_run_dir = BASE_RUN, vars = c("Biomass", "Catch", "F"),
+  species_patterns = c("gag", "red grouper"), ens_mode = "aic",
+  top_n_prop = ENS_PROP, target_ess = ENS_ESS, palette = "magma",
+  plots_dir = file.path(PLOTS, "ts"))                        # gradient + baseline + best + mean
+facet_best_vs_mean <- plot_ga_ensemble_faceted(
+  obs, ga_runs, init_run_dir = BASE_RUN, vars = c("Biomass", "Catch", "F"),
+  species_patterns = c("gag", "red grouper"), ens_mode = "aic",
+  top_n_prop = ENS_PROP, target_ess = ENS_ESS, show_candidates = FALSE, file_suffix = "_best_vs_mean",
+  plots_dir = file.path(PLOTS, "ts"))                        # ONLY baseline + best + mean
+best_vs_mean <- compare_best_vs_ensemble_mean(ga_runs, top_n_prop = ENS_PROP, target_ess = ENS_ESS)
+print(best_vs_mean)   # correlation, mean |% difference|, relative RMSE per stanza and variable
+write.csv(best_vs_mean, file.path(PLOTS, "ts", "best_vs_ensemble_mean.csv"), row.names = FALSE)
+
+# regions + WFS panel for gag age 0: baseline (black dashed), best (teal dashed) and all last-generation models (magma = NLL)
 region_ts <- plot_region_timeseries_grid(
   ga_runs = ga_runs, species_pattern = "gag 0", init_run_dir = BASE_RUN,
   region_mask = age0_regions, region_attributes = region_attrs, obs = obs,
   domain_obs_pattern = "FWCNMFS", map_show_land = TRUE,
-  show_ensemble = TRUE, top_n_prop = ENS_PROP, target_ess = ENS_ESS,
+  show_ensemble = TRUE, ensemble_style = "lines", palette = "magma",   # baseline + best + ALL last-generation models (colour = NLL)
+  ens_mode = "quantile", keep_fitness_quantile = 1,
   ensemble_max_folders = N_CAND, plots_dir = file.path(PLOTS, "ts"))
 print(table(region_ts$run, region_ts$region_id))   # an "init" row per region = baseline is drawn
 
 gen_summary <- plot_ga_generation_best(
-  obs, ga_runs, vars = c("Biomass", "Catch", "F"), species_patterns = c("gag", "red grouper"),
-  palette = "viridis", plots_dir = file.path(PLOTS, "ts"))
+  obs, ga_runs, init_run_dir = BASE_RUN, vars = c("Biomass", "Catch", "F"),
+  species_patterns = c("gag", "red grouper"), palette = "magma", plots_dir = file.path(PLOTS, "ts"))
 
 ## ---- 5. SPATIAL MAPS, RED TIDE MORTALITY, RESIDUALS --------------------------------------------
 map_root_dir <- DATA_DIR

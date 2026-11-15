@@ -1334,6 +1334,8 @@ plot_ga_ensemble <- function(obs = NULL,
                              keep_fitness_quantile = NULL,
                              exclude_run_folders   = NULL,
                              max_candidates        = 1000,
+                             palette               = "magma",
+                             fitness_color_quantile = 0.95,
                              plots_dir             = "plots",
                              width = 7.5, height = 5, dpi = 150){
   
@@ -1506,13 +1508,16 @@ plot_ga_ensemble <- function(obs = NULL,
         ggplot2::geom_line(data = pred_df,
                            ggplot2::aes(x = year, y = value, group = candidate, color = fitness),
                            linewidth = 0.35, alpha = 0.65) +
-        ggplot2::scale_color_viridis_c(option = "plasma", direction = -1, trans = "log10", name = "NLL") +
+        {
+          a <- .nll_scale(.nll_limits(valid$fitness, fitness_color_quantile), palette, guide = "colourbar")
+          a
+        } +
         { if(!is.null(init_df))
           ggplot2::geom_line(data = init_df, ggplot2::aes(x = year, y = value),
-                             color = "black", linewidth = 1, linetype = "22")
+                             color = "black", linewidth = 1.1, linetype = "22")
         } +
         ggplot2::geom_line(data = best_df, ggplot2::aes(x = year, y = value),
-                           color = "#20B2AA", linewidth = 1.1) +
+                           color = "#20B2AA", linewidth = 1.1, linetype = "22") +
         { if(nrow(obs_df) > 0)
           ggplot2::geom_point(data = obs_df, ggplot2::aes(x = year, y = value, shape = series),
                               color = "black", size = 2.2)
@@ -1528,8 +1533,10 @@ plot_ga_ensemble <- function(obs = NULL,
           ggplot2::scale_shape_manual(values = rep(0:25, length.out = nlevels(obs_df$series)))
         }
       
+      leg_ref <- .ref_line_legend(base_size = 9, key_cm = 1.2, has_baseline = !is.null(init_df))
+      if(!is.null(leg_ref)) p <- (p / leg_ref) + patchwork::plot_layout(heights = c(1, 0.05))
       png_file <- file.path(plots_dir, paste0(var, "_ensemble_", safe_name(group_name), ".png"))
-      ggplot2::ggsave(png_file, plot = p, width = width, height = height, dpi = dpi, units = "in")
+      ggplot2::ggsave(png_file, plot = p, width = width, height = height + 0.4, dpi = dpi, units = "in")
       
       summary_rows[[length(summary_rows) + 1]] <- data.frame(
         variable             = var,
@@ -1548,6 +1555,130 @@ plot_ga_ensemble <- function(obs = NULL,
   invisible(do.call(rbind, summary_rows))
 }
 
+
+
+#' @title Numeric check: is the AIC-weighted ensemble mean similar to the best model?
+#' @description For every (variable, stanza) compares the best model's annual series with the
+#'   AIC-weighted mean of the selected ensemble. Returns correlation, mean absolute % difference
+#'   and relative RMSE (RMSE / mean of the best series).
+compare_best_vs_ensemble_mean <- function(ga_runs, vars = c("Biomass", "Catch", "F"),
+                                          species_patterns = c("gag", "red grouper"),
+                                          top_n_prop = 0.10, target_ess = 25){
+  valid <- ga_runs[ga_runs$exists, , drop = FALSE]
+  valid <- select_ensemble_candidates(valid, mode = "aic", top_n_prop = top_n_prop, target_ess = target_ess)
+  w <- valid$ens_weight; w[!is.finite(w)] <- 0
+  best <- valid[which.min(valid$fitness), ]
+  caches <- setNames(lapply(seq_len(nrow(valid)), function(i) new.env(parent = emptyenv())), valid$run_folder)
+  gl <- function(pr, pool_codes) pr$group_names[pool_codes + 1L]
+  ref <- get_region_output(0L, "Biomass", valid$run_dir[1], caches[[1]])
+  tg <- find_pool_codes_by_name(ref$group_names, species_patterns)
+  out <- list()
+  for(var in vars) for(g in seq_len(nrow(tg))){
+    ser <- lapply(seq_len(nrow(valid)), function(i){
+      if(w[i] <= 0 && valid$run_folder[i] != best$run_folder) return(NULL)
+      pr <- tryCatch(build_predicted_vector_generic(tg$pool_code[g], 0L, var, valid$run_dir[i],
+                                                    caches[[i]], gl), error = function(e) NULL)
+      if(is.null(pr) || is.null(pr$vec)) NULL else list(y = pr$years, v = pr$vec, i = i)
+    })
+    ser <- Filter(Negate(is.null), ser)
+    if(length(ser) == 0) next
+    yrs <- ser[[1]]$y
+    M <- do.call(cbind, lapply(ser, function(s) s$v)); ww <- w[vapply(ser, function(s) s$i, 1L)]
+    ens <- apply(M, 1, stats::weighted.mean, w = ww, na.rm = TRUE)
+    bv  <- ser[[which(vapply(ser, function(s) valid$run_folder[s$i] == best$run_folder, logical(1)))[1]]]$v
+    ok <- is.finite(ens) & is.finite(bv)
+    out[[length(out) + 1]] <- data.frame(
+      variable = var, group = tg$group_name[g], n_members = sum(ww > 0),
+      correlation = round(stats::cor(ens[ok], bv[ok]), 3),
+      mean_abs_pct_diff = round(100 * mean(abs(ens[ok] - bv[ok]) / pmax(abs(bv[ok]), 1e-12)), 1),
+      rel_rmse = round(sqrt(mean((ens[ok] - bv[ok])^2)) / mean(abs(bv[ok])), 3))
+  }
+  do.call(rbind, out)
+}
+
+
+# one-row legend for the reference lines (shared by the figures that show baseline + best + gradient)
+.ref_line_legend <- function(base_size = 10, key_cm = 1.6, has_baseline = TRUE){
+  labs_ <- c(if(has_baseline) "Baseline model", "Best model", "Last-generation models (colour = NLL)")
+  d <- expand.grid(x = c(1, 2), line = factor(labs_, levels = labs_)); d$y <- 1
+  cols <- c("Baseline model" = "black", "Best model" = "#20B2AA", "Last-generation models (colour = NLL)" = "#B5367A")[labs_]
+  lts  <- c("Baseline model" = "22", "Best model" = "22", "Last-generation models (colour = NLL)" = "solid")[labs_]
+  src <- ggplot2::ggplot(d, ggplot2::aes(x = x, y = y, color = line, linetype = line)) +
+    ggplot2::geom_line(linewidth = 1.1) +
+    ggplot2::scale_color_manual(values = cols, name = NULL) +
+    ggplot2::scale_linetype_manual(values = lts, name = NULL) +
+    ggplot2::theme_void(base_size = base_size) +
+    ggplot2::theme(legend.position = "bottom", legend.text = ggplot2::element_text(size = base_size),
+                   legend.margin = ggplot2::margin(0, 0, 0, 0), plot.margin = ggplot2::margin(0, 0, 0, 0),
+                   legend.key.width = grid::unit(key_cm, "cm"), legend.key.spacing.x = grid::unit(0.8, "cm")) +
+    ggplot2::guides(color = ggplot2::guide_legend(nrow = 1, override.aes = list(linewidth = 1.5)),
+                    linetype = ggplot2::guide_legend(nrow = 1))
+  g <- ggplot2::ggplotGrob(src)
+  gi <- which(vapply(g$grobs, function(x) inherits(x, "gtable") && x$name == "guide-box", logical(1)))
+  if(length(gi) == 0) return(NULL)
+  patchwork::wrap_elements(full = g$grobs[[gi[1]]], clip = FALSE)
+}
+
+# ---- shared NLL colour helpers (magma, capped upper limit) + aligned colorbar --------
+.nll_limits <- function(fitness, q = 0.95){
+  fitness <- fitness[is.finite(fitness) & fitness > 0]
+  lo <- min(fitness)
+  hi <- if(is.null(q) || q >= 1) max(fitness) else as.numeric(stats::quantile(fitness, q))
+  if(!is.finite(hi) || hi <= lo) hi <- max(fitness)
+  c(lo, hi)
+}
+.nll_scale <- function(limits, palette = "magma", aes = c("colour", "fill"), guide = "none"){
+  aes <- match.arg(aes)
+  # low NLL (good) = light end, high NLL = dark; the light end is capped (end = 0.85) so the
+  # best-fitting lines stay visible on a white background
+  args <- list(option = palette, direction = -1, begin = 0, end = if(palette == "magma") 0.85 else 1,
+               trans = "log10", limits = limits, oob = scales::squish, name = "NLL", guide = guide)
+  if(aes == "colour") do.call(ggplot2::scale_color_viridis_c, args)
+  else do.call(ggplot2::scale_fill_viridis_c, args)
+}
+# Colorbar drawn as a REAL ggplot panel with the same title row / bottom-axis rows as the
+# map panels, placed in one patchwork cell spanning every row, so the bar's top and bottom
+# coincide with the top of the first panel box and the bottom of the last panel box.
+.nll_bar_plot <- function(limits, palette = "magma", base_size = 10,
+                          title_size = 11, axis_title_size = 11, axis_text_size = 9){
+  yy <- exp(seq(log(limits[1]), log(limits[2]), length.out = 300))
+  d  <- data.frame(x = 1, y = yy)
+  ggplot2::ggplot(d, ggplot2::aes(x = x, y = y, fill = y)) +
+    ggplot2::geom_raster(interpolate = TRUE) +
+    .nll_scale(limits, palette, "fill") +
+    ggplot2::scale_x_continuous(expand = c(0, 0), breaks = 1, labels = "0000") +
+    ggplot2::scale_y_log10(expand = c(0, 0), position = "right",
+                           labels = function(x) format(x, big.mark = "", scientific = FALSE, trim = TRUE)) +
+    ggplot2::coord_cartesian(ylim = limits) +
+    ggplot2::labs(title = "NLL", x = "Year", y = NULL) +
+    ggplot2::theme_bw(base_size = base_size) +
+    ggplot2::theme(
+      panel.grid = ggplot2::element_blank(),
+      panel.border = ggplot2::element_rect(colour = "black", fill = NA, linewidth = 0.5),
+      plot.title = ggplot2::element_text(size = title_size, face = "bold", hjust = 0,
+                                         margin = ggplot2::margin(0, 0, 4, 0)),
+      # invisible placeholders that reserve exactly the same height as the panels' x axis
+      axis.title.x = ggplot2::element_text(size = axis_title_size, colour = "transparent"),
+      axis.text.x  = ggplot2::element_text(size = axis_text_size,  colour = "transparent"),
+      axis.ticks.x = ggplot2::element_line(colour = "transparent", linewidth = 0.5),
+      axis.text.y.right = ggplot2::element_text(size = axis_text_size),
+      legend.position = "none",
+      plot.margin = ggplot2::margin(4, 2, 4, 2))
+}
+.assemble_nll_figure <- function(panel_list, facet_ncol, bar, bar_width = 0.09){
+  n <- length(panel_list); nr <- ceiling(n / facet_ncol)
+  pl <- panel_list
+  nfill <- nr * facet_ncol - n
+  if(nfill > 0) for(k in seq_len(nfill)) pl[[length(pl) + 1]] <- patchwork::plot_spacer()
+  pl[[length(pl) + 1]] <- bar
+  letters_use <- LETTERS[seq_along(pl)]
+  bar_l <- letters_use[length(pl)]
+  rows <- vapply(seq_len(nr), function(r)
+    paste0(paste(letters_use[((r - 1) * facet_ncol + 1):(r * facet_ncol)], collapse = ""), bar_l),
+    character(1))
+  patchwork::wrap_plots(pl, design = paste(rows, collapse = "\n"),
+                        widths = c(rep(1, facet_ncol), bar_width))
+}
 
 #' @title Faceted version of plot_ga_ensemble(): all stanzas of one species in one PNG.
 #' @description Same data/filtering pipeline as plot_ga_ensemble(), but one PNG per
@@ -1602,6 +1733,10 @@ plot_ga_ensemble_faceted <- function(obs = NULL,
                                      exclude_run_folders   = NULL,
                                      max_candidates        = 1000,
                                      facet_ncol            = 3,
+                                     palette               = "magma",
+                                     fitness_color_quantile = 0.95,
+                                     show_candidates       = TRUE,   # FALSE: only baseline / best / ensemble mean
+                                     file_suffix           = "",
                                      plots_dir             = "plots",
                                      width = 10, height = 7, dpi = 150){
   
@@ -1798,7 +1933,7 @@ plot_ga_ensemble_faceted <- function(obs = NULL,
       # bottommost in their own column) ----
       group_levels <- levels(pred_df$group_name)
       n_groups <- length(group_levels)
-      fitness_limits <- range(valid$fitness, na.rm = TRUE)
+      fitness_limits <- .nll_limits(valid$fitness, fitness_color_quantile)
       
       panel_list <- list()
       for(idx in seq_along(group_levels)){
@@ -1858,8 +1993,9 @@ plot_ga_ensemble_faceted <- function(obs = NULL,
         # both on the actual data points and on the matching legend key points
         n_series_here <- nlevels(sub_obs$series)
         
-        pp <- ggplot2::ggplot() +
-          ggplot2::geom_line(data = sub_pred,
+        pp <- ggplot2::ggplot()
+        if(show_candidates)
+          pp <- pp + ggplot2::geom_line(data = sub_pred,
                              ggplot2::aes(x = year, y = value, group = candidate, color = fitness),
                              linewidth = line_width, alpha = alpha)
         if(!is.null(sub_init) && nrow(sub_init) > 0)
@@ -1885,8 +2021,7 @@ plot_ga_ensemble_faceted <- function(obs = NULL,
         if(nrow(sub_obs) > 0)
           pp <- pp + ggplot2::scale_shape_manual(values = rep(21:25, length.out = n_series_here), guide = "none")
         pp <- pp +
-          ggplot2::scale_color_viridis_c(option = "plasma", direction = -1, trans = "log10",
-                                         name = "NLL", limits = fitness_limits, guide = "none") +
+          (if(show_candidates) .nll_scale(fitness_limits, palette) else NULL) +
           ggplot2::scale_x_continuous(expand = c(0, 0)) +
           ggplot2::scale_y_continuous(expand = c(0, 0)) +
           # coord_cartesian(), not scale_y_continuous(limits=) -- the latter DROPS any
@@ -1941,9 +2076,9 @@ plot_ga_ensemble_faceted <- function(obs = NULL,
       ref_line_colors <- c(ref_line_colors, "Best model" = "#20B2AA")
       ref_line_linetypes <- c(ref_line_linetypes, "Best model" = "22")
       if(ens_mode == "aic"){
-        ref_line_labels <- c(ref_line_labels, "Ensemble model")
-        ref_line_colors <- c(ref_line_colors, "Ensemble model" = "grey30")
-        ref_line_linetypes <- c(ref_line_linetypes, "Ensemble model" = "solid")
+        ref_line_labels <- c(ref_line_labels, "Ensemble mean (AIC-weighted)")
+        ref_line_colors <- c(ref_line_colors, "Ensemble mean (AIC-weighted)" = "grey30")
+        ref_line_linetypes <- c(ref_line_linetypes, "Ensemble mean (AIC-weighted)" = "solid")
       }
       ref_legend_df <- expand.grid(x = c(1, 2),
                                    line = factor(ref_line_labels, levels = ref_line_labels))
@@ -1955,7 +2090,7 @@ plot_ga_ensemble_faceted <- function(obs = NULL,
       # linetype into ONE combined guide automatically since both share the same
       # grouping variable (line) and labels.
       ref_legend_source <- ggplot2::ggplot(ref_legend_df,
-        ggplot2::aes(x = x, y = y, color = line, linetype = line)) +
+                                           ggplot2::aes(x = x, y = y, color = line, linetype = line)) +
         ggplot2::geom_line(linewidth = 1.1) +
         ggplot2::scale_color_manual(values = ref_line_colors, name = NULL) +
         ggplot2::scale_linetype_manual(values = ref_line_linetypes, name = NULL) +
@@ -1966,7 +2101,7 @@ plot_ga_ensemble_faceted <- function(obs = NULL,
                        plot.margin = ggplot2::margin(0, 0, 0, 0),
                        # widened so a dashed key actually shows multiple dash segments
                        # rather than looking like one short, ambiguous stroke
-                       legend.key.width = grid::unit(1.6, "cm")) +
+                       legend.key.width = grid::unit(1.6, "cm"), legend.key.spacing.x = grid::unit(0.8, "cm")) +
         ggplot2::guides(color = ggplot2::guide_legend(nrow = 1, override.aes = list(linewidth = 1.5)),
                         linetype = ggplot2::guide_legend(nrow = 1, override.aes = list(linewidth = 1.5)))
       
@@ -1987,42 +2122,8 @@ plot_ga_ensemble_faceted <- function(obs = NULL,
       # plot_spacer() with a NEGATIVE height stacked ABOVE the legend via `/` (see
       # nll_legend_plot below), which shifts the legend upward to compensate for the
       # panels' own title space -- not a margin tweak on the legend plot itself.
-      nll_legend_source <- ggplot2::ggplot(valid, ggplot2::aes(x = 1, y = fitness, colour = fitness)) +
-        ggplot2::geom_point(alpha = 0) +
-        ggplot2::scale_colour_viridis_c(option = "plasma", direction = -1, trans = "log10",
-                                        limits = fitness_limits, name = "NLL",
-                                        guide = ggplot2::guide_colorbar(
-                                          title.position = "top", title.hjust = 0,
-                                          barheight = grid::unit(14.8, "cm"),
-                                          barwidth = grid::unit(0.55, "cm"),
-                                          frame.colour = "black", frame.linewidth = 0.5,
-                                          ticks = TRUE, ticks.colour = "black")) +
-        ggplot2::theme_void() +
-        ggplot2::theme(legend.position = "right", legend.justification = "left",
-                       legend.title = ggplot2::element_text(size = 11, hjust = 0),
-                       legend.text = ggplot2::element_text(size = 10),
-                       legend.margin = ggplot2::margin(0, 0, 0, 0),
-                       plot.margin = ggplot2::margin(0, 0, 0, 0))
-      
-      nll_grob <- ggplot2::ggplotGrob(nll_legend_source)
-      guide_index <- which(vapply(nll_grob$grobs, function(x)
-        inherits(x, "gtable") && x$name == "guide-box", logical(1)))
-      
-      n_rows_actual <- ceiling(length(panel_list) / facet_ncol)
-      panel_grid <- patchwork::wrap_plots(panel_list, ncol = facet_ncol, nrow = n_rows_actual)
-      
-      if(length(guide_index) > 0){
-        nll_legend_grob <- nll_grob$grobs[[guide_index[1]]]
-        # plot_spacer() with a NEGATIVE height, stacked ABOVE the legend -- this is
-        # the actual alignment mechanism, not a margin on the legend plot itself
-        nll_legend_plot <- (patchwork::plot_spacer() /
-                              patchwork::wrap_elements(full = nll_legend_grob, clip = FALSE)) +
-          patchwork::plot_layout(heights = c(-0.11, 0.989))
-        p <- (panel_grid | nll_legend_plot) + patchwork::plot_layout(widths = c(1, 0.075))
-      } else {
-        message("  [note] could not extract NLL colorbar grob -- combined figure will have no NLL legend.")
-        p <- panel_grid
-      }
+      p <- if(show_candidates) .assemble_nll_figure(panel_list, facet_ncol, .nll_bar_plot(fitness_limits, palette)) else
+        patchwork::wrap_plots(panel_list, ncol = facet_ncol)
       
       # stack the reference-line legend below the whole figure (panel grid + NLL bar)
       if(!is.null(ref_legend_plot)){
@@ -2032,7 +2133,7 @@ plot_ga_ensemble_faceted <- function(obs = NULL,
                 "have no bottom legend for init/best-fit/ensemble-mean lines.")
       }
       
-      png_file <- file.path(plots_dir, paste0(var, "_ensemble_facet_", safe_name(sp), "_", ens_mode, ".png"))
+      png_file <- file.path(plots_dir, paste0(var, "_ensemble_facet_", safe_name(sp), "_", ens_mode, file_suffix, ".png"))
       ggplot2::ggsave(png_file, plot = p, width = width, height = height, dpi = dpi, units = "in")
       
       summary_rows[[length(summary_rows) + 1]] <- data.frame(
@@ -2094,7 +2195,9 @@ plot_ga_generation_best <- function(obs = NULL,
                                     ga_runs,
                                     vars              = c("Biomass", "Catch", "F"),
                                     species_patterns  = c("gag", "red grouper"),
-                                    palette           = c("viridis", "plasma"),
+                                    init_run_dir      = NULL,
+                                    palette           = c("magma", "plasma", "viridis"),
+                                    fitness_color_quantile = 0.95,
                                     overlay_obs       = TRUE,
                                     ylim_from_obs     = TRUE,
                                     ylim_pad          = 0.15,
@@ -2192,6 +2295,8 @@ plot_ga_generation_best <- function(obs = NULL,
       
       pred_list <- list()
       obs_list  <- list()
+      init_list <- list()
+      init_cache <- new.env(parent = emptyenv())
       
       for(gi in seq_len(nrow(grp_rows))){
         pool_code  <- grp_rows$pool_code[gi]
@@ -2206,6 +2311,15 @@ plot_ga_generation_best <- function(obs = NULL,
             candidate = var_valid$run_folder[i], generation = var_valid$generation[i],
             fitness = var_valid$fitness[i], stringsAsFactors = FALSE
           )
+        }
+        
+        if(!is.null(init_run_dir)){
+          pr_init <- build_predicted_vector_generic(pool_code, 0L, var, init_run_dir,
+                                                    init_cache, group_names_lookup)
+          if(!is.null(pr_init$vec) && !all(is.na(pr_init$vec)))
+            init_list[[length(init_list) + 1]] <- data.frame(
+              year = pr_init$years, value = pr_init$vec, group_name = group_name,
+              stringsAsFactors = FALSE)
         }
         
         if(overlay_obs){
@@ -2232,6 +2346,8 @@ plot_ga_generation_best <- function(obs = NULL,
       pred_df$group_name <- factor(pred_df$group_name, levels = grp_rows$group_name)
       pred_df$generation <- factor(pred_df$generation, levels = sort(unique(pred_df$generation)))
       best_df <- pred_df[pred_df$candidate == overall_best$run_folder, , drop = FALSE]
+      init_df <- if(length(init_list) > 0) do.call(rbind, init_list) else NULL
+      if(!is.null(init_df)) init_df$group_name <- factor(init_df$group_name, levels = grp_rows$group_name)
       
       # Order candidates from highest NLL to lowest NLL so the lowest-NLL (best, yellow
       # with plasma+direction=-1) candidates draw last and appear on top -- matching
@@ -2289,7 +2405,7 @@ plot_ga_generation_best <- function(obs = NULL,
       # at the bottom of each column ----
       group_levels <- levels(pred_df$group_name)
       n_groups_here <- length(group_levels)
-      fitness_limits <- range(var_valid$fitness, na.rm = TRUE)
+      fitness_limits <- .nll_limits(var_valid$fitness, fitness_color_quantile)
       
       panel_list <- list()
       for(idx in seq_along(group_levels)){
@@ -2328,8 +2444,12 @@ plot_ga_generation_best <- function(obs = NULL,
           ggplot2::geom_line(data = sub_pred,
                              ggplot2::aes(x = year, y = value, group = candidate, color = fitness),
                              linewidth = 0.35, alpha = 0.35)
+        sub_init <- if(!is.null(init_df)) init_df[init_df$group_name == gn, , drop = FALSE] else NULL
+        if(!is.null(sub_init) && nrow(sub_init) > 0)
+          pp <- pp + ggplot2::geom_line(data = sub_init, ggplot2::aes(x = year, y = value),
+                                        color = "black", linewidth = 1.25, linetype = "22")
         pp <- pp + ggplot2::geom_line(data = sub_best, ggplot2::aes(x = year, y = value),
-                                      color = "#20B2AA", linewidth = 1.25)
+                                      color = "#20B2AA", linewidth = 1.25, linetype = "22")
         if(nrow(sub_obs) > 0)
           pp <- pp + ggplot2::geom_point(data = sub_obs, ggplot2::aes(x = year, y = value, shape = series),
                                          fill = "white", color = "black", size = 2.0, stroke = 0.8)
@@ -2345,11 +2465,7 @@ plot_ga_generation_best <- function(obs = NULL,
         if(nrow(sub_obs) > 0)
           pp <- pp + ggplot2::scale_shape_manual(values = rep(21:25, length.out = n_series_here), guide = "none")
         pp <- pp +
-          (if(palette == "plasma")
-            ggplot2::scale_color_viridis_c(option = "plasma", direction = -1, trans = "log10",
-                                           name = "NLL", limits = fitness_limits, guide = "none")
-           else
-             ggplot2::scale_color_viridis_c(trans = "log10", name = "NLL", limits = fitness_limits, guide = "none")) +
+          .nll_scale(fitness_limits, palette) +
           ggplot2::scale_x_continuous(expand = c(0, 0)) +
           ggplot2::scale_y_continuous(expand = c(0, 0)) +
           ggplot2::coord_cartesian(ylim = c(y_min, y_max_plot)) +
@@ -2380,49 +2496,27 @@ plot_ga_generation_best <- function(obs = NULL,
         next
       }
       
-      # dedicated NLL colorbar, built separately and placed beside the panel grid --
-      # same mechanism as plot_ga_ensemble_faceted()
-      nll_legend_source <- ggplot2::ggplot(var_valid, ggplot2::aes(x = 1, y = fitness, colour = fitness)) +
-        ggplot2::geom_point(alpha = 0) +
-        (if(palette == "plasma")
-          ggplot2::scale_colour_viridis_c(option = "plasma", direction = -1, trans = "log10",
-                                          limits = fitness_limits, name = "NLL",
-                                          guide = ggplot2::guide_colorbar(
-                                            title.position = "top", title.hjust = 0,
-                                            barheight = grid::unit(0.832 * height, "in"),
-                                            barwidth = grid::unit(0.55, "cm"),
-                                            frame.colour = "black", frame.linewidth = 0.5,
-                                            ticks = TRUE, ticks.colour = "black"))
-         else
-           ggplot2::scale_colour_viridis_c(trans = "log10", limits = fitness_limits, name = "NLL",
-                                           guide = ggplot2::guide_colorbar(
-                                             title.position = "top", title.hjust = 0,
-                                             barheight = grid::unit(0.832 * height, "in"),
-                                             barwidth = grid::unit(0.55, "cm"),
-                                             frame.colour = "black", frame.linewidth = 0.5,
-                                             ticks = TRUE, ticks.colour = "black"))) +
+      p <- .assemble_nll_figure(panel_list, facet_ncol, .nll_bar_plot(fitness_limits, palette))
+      
+      # bottom legend for the reference lines (same style as plot_ga_ensemble_faceted)
+      ref_labs <- c(if(!is.null(init_df)) "Baseline model", "Best model")
+      ref_cols <- c("Baseline model" = "black", "Best model" = "#20B2AA")[ref_labs]
+      ref_df <- expand.grid(x = c(1, 2), line = factor(ref_labs, levels = ref_labs)); ref_df$y <- 1
+      ref_src <- ggplot2::ggplot(ref_df, ggplot2::aes(x = x, y = y, color = line, linetype = line)) +
+        ggplot2::geom_line(linewidth = 1.1) +
+        ggplot2::scale_color_manual(values = ref_cols, name = NULL) +
+        ggplot2::scale_linetype_manual(values = setNames(rep("22", length(ref_labs)), ref_labs), name = NULL) +
         ggplot2::theme_void() +
-        ggplot2::theme(legend.position = "right", legend.justification = "left",
-                       legend.title = ggplot2::element_text(size = 11, hjust = 0),
-                       legend.text = ggplot2::element_text(size = 9),
-                       legend.margin = ggplot2::margin(0, 0, 0, 0),
-                       plot.margin = ggplot2::margin(0, 0, 0, 0))
-      
-      nll_grob <- ggplot2::ggplotGrob(nll_legend_source)
-      guide_index <- which(vapply(nll_grob$grobs, function(x)
-        inherits(x, "gtable") && x$name == "guide-box", logical(1)))
-      
-      n_rows_actual <- ceiling(length(panel_list) / facet_ncol)
-      panel_grid <- patchwork::wrap_plots(panel_list, ncol = facet_ncol, nrow = n_rows_actual)
-      
-      if(length(guide_index) > 0){
-        nll_legend_grob <- nll_grob$grobs[[guide_index[1]]]
-        nll_legend_plot <- patchwork::wrap_elements(full = nll_legend_grob, clip = FALSE)
-        p <- (panel_grid | nll_legend_plot) + patchwork::plot_layout(widths = c(1, 0.075))
-      } else {
-        message("  [note] could not extract NLL colorbar grob -- combined figure will have no NLL legend.")
-        p <- panel_grid
-      }
+        ggplot2::theme(legend.position = "bottom", legend.text = ggplot2::element_text(size = 10),
+                       legend.margin = ggplot2::margin(0, 0, 0, 0), plot.margin = ggplot2::margin(0, 0, 0, 0),
+                       legend.key.width = grid::unit(1.6, "cm"), legend.key.spacing.x = grid::unit(0.8, "cm")) +
+        ggplot2::guides(color = ggplot2::guide_legend(nrow = 1, override.aes = list(linewidth = 1.5)),
+                        linetype = ggplot2::guide_legend(nrow = 1, override.aes = list(linewidth = 1.5)))
+      ref_grob <- ggplot2::ggplotGrob(ref_src)
+      gi <- which(vapply(ref_grob$grobs, function(x) inherits(x, "gtable") && x$name == "guide-box", logical(1)))
+      if(length(gi) > 0)
+        p <- (p / patchwork::wrap_elements(full = ref_grob$grobs[[gi[1]]], clip = FALSE)) +
+          patchwork::plot_layout(heights = c(1, 0.04))
       
       png_file <- file.path(plots_dir, paste0(var, "_gen_best_", safe_name(sp), ".png"))
       ggplot2::ggsave(png_file, plot = p, width = width, height = height, dpi = dpi, units = "in")
@@ -3438,7 +3532,7 @@ plot_spatial_residuals_older_stanzas <- function(raster_dir, ga_runs,
 #'   data.frame(year, biomass_sum)) -- both already converted from density to total
 #'   biomass (t) via cell_area_km2.
 .aggregate_biomass_by_region_and_domain <- function(run_dir, group_token, region_mask,
-                                                     cell_area_km2 = 9.26108^2){
+                                                    cell_area_km2 = 9.26108^2){
   path <- file.path(run_dir, paste0("EcospaceMapBiomass-", group_token, ".csv"))
   if(!file.exists(path)) stop(".aggregate_biomass_by_region_and_domain(): file not found: ", path)
   m <- read_ecospace_map(path)
@@ -3680,6 +3774,8 @@ plot_region_timeseries_grid <- function(run_dir = NULL, init_run_dir = NULL, gro
                                         region_mask,
                                         ga_runs = NULL, species_pattern = NULL,
                                         show_ensemble = FALSE,
+                                        ensemble_style = c("lines", "ribbon"),   # lines: baseline + best + every selected model coloured by NLL
+                                        palette = "magma", fitness_color_quantile = 0.95,
                                         ens_mode = c("aic", "quantile", "topN"),
                                         keep_fitness_quantile = 0.9,
                                         top_n = 100, top_n_prop = NULL, target_ess = 100,
@@ -3702,6 +3798,7 @@ plot_region_timeseries_grid <- function(run_dir = NULL, init_run_dir = NULL, gro
     stop("plot_region_timeseries_grid(): `obs` is required -- only regions with a matched ",
          "observed series are plotted (see description).")
   ens_mode <- match.arg(ens_mode)
+  ensemble_style <- match.arg(ensemble_style)
   if(show_ensemble && is.null(ga_runs))
     stop("plot_region_timeseries_grid(): show_ensemble = TRUE requires `ga_runs`, ",
          "regardless of whether `run_dir` was supplied explicitly.")
@@ -3815,6 +3912,8 @@ plot_region_timeseries_grid <- function(run_dir = NULL, init_run_dir = NULL, gro
   ribbon_df <- NULL
   domain_ribbon_df <- NULL
   domain_ens_mean_df <- NULL
+  cand_region_df <- NULL
+  cand_domain_df <- NULL
   if(show_ensemble){
     valid_ens <- ga_runs[ga_runs$exists, , drop = FALSE]
     sel <- select_ensemble_candidates(valid_ens, mode = ens_mode,
@@ -3842,7 +3941,7 @@ plot_region_timeseries_grid <- function(run_dir = NULL, init_run_dir = NULL, gro
       n_ens_found <- 0
       for(i in seq_len(nrow(sel))){
         both_i <- tryCatch(.aggregate_biomass_by_region_and_domain(sel$run_dir[i], group_token,
-                                                                    region_mask, cell_area_km2),
+                                                                   region_mask, cell_area_km2),
                            error = function(e) NULL)
         if(is.null(both_i) || is.null(both_i$by_region)) next
         agg_i <- both_i$by_region
@@ -3862,6 +3961,9 @@ plot_region_timeseries_grid <- function(run_dir = NULL, init_run_dir = NULL, gro
                 "skipping the ensemble mean/ribbon.")
       } else {
         ens_long <- do.call(rbind, ens_rows)
+        fit_map <- stats::setNames(sel$fitness, sel$run_folder)
+        cand_region_df <- ens_long
+        cand_region_df$fitness <- unname(fit_map[cand_region_df$run_folder])
         ens_dt <- data.table::as.data.table(ens_long)
         ens_summary <- ens_dt[, {
           wm <- stats::weighted.mean(biomass_sum, weight, na.rm = TRUE)
@@ -3881,6 +3983,8 @@ plot_region_timeseries_grid <- function(run_dir = NULL, init_run_dir = NULL, gro
         
         if(length(ens_domain_rows) > 0){
           ens_domain_long <- do.call(rbind, ens_domain_rows)
+          cand_domain_df <- ens_domain_long
+          cand_domain_df$fitness <- unname(fit_map[cand_domain_df$run_folder])
           ens_domain_dt <- data.table::as.data.table(ens_domain_long)
           domain_summary <- ens_domain_dt[, {
             wm <- stats::weighted.mean(biomass_sum, weight, na.rm = TRUE)
@@ -3900,6 +4004,9 @@ plot_region_timeseries_grid <- function(run_dir = NULL, init_run_dir = NULL, gro
       }
     }
   }
+  
+  use_lines <- show_ensemble && ensemble_style == "lines" && !is.null(cand_region_df)
+  fit_lim <- if(use_lines) .nll_limits(unique(cand_region_df$fitness), fitness_color_quantile) else NULL
   
   lab <- if(!is.null(region_attributes))
     stats::setNames(as.character(region_attributes$NAME), as.character(region_attributes$ID)) else NULL
@@ -3969,7 +4076,23 @@ plot_region_timeseries_grid <- function(run_dir = NULL, init_run_dir = NULL, gro
     this_color <- unname(region_colors[lbl])
     
     pp <- ggplot2::ggplot()
-    if(show_ensemble){
+    if(use_lines){
+      # baseline (black dashed) + best model (teal dashed) + EVERY selected last-generation
+      # model as a thin line coloured by its NLL (magma, worst drawn first)
+      sub_c <- cand_region_df[cand_region_df$region_id == rid, , drop = FALSE]
+      sub_c <- sub_c[order(-sub_c$fitness, sub_c$run_folder, sub_c$year), , drop = FALSE]
+      sub_c$run_folder <- factor(sub_c$run_folder, levels = unique(sub_c$run_folder))
+      pp <- pp + ggplot2::geom_line(data = sub_c,
+                                    ggplot2::aes(x = year, y = biomass_sum, group = run_folder, colour = fitness),
+                                    linewidth = 0.5, alpha = 0.55)
+      if(nrow(sub_init) > 0)
+        pp <- pp + ggplot2::geom_line(data = sub_init, ggplot2::aes(x = year, y = biomass_sum),
+                                      color = "black", linewidth = 1.4, linetype = "22")
+      if(nrow(sub_best) > 0)
+        pp <- pp + ggplot2::geom_line(data = sub_best, ggplot2::aes(x = year, y = biomass_sum),
+                                      color = "#20B2AA", linewidth = 1.6, linetype = "22")
+      pp <- pp + .nll_scale(fit_lim, palette)
+    } else if(show_ensemble){
       # ONLY the AIC-weighted ensemble mean + its 95% CI ribbon -- both in the
       # region's own color, ribbon at low alpha for the uncertainty shading. init and
       # best-fit are deliberately NOT drawn in this mode (per request: only the
@@ -3978,6 +4101,9 @@ plot_region_timeseries_grid <- function(run_dir = NULL, init_run_dir = NULL, gro
         pp <- pp + ggplot2::geom_ribbon(data = sub_ribbon,
                                         ggplot2::aes(x = year, ymin = pmax(lo, 0), ymax = hi),
                                         fill = this_color, alpha = 0.25, colour = NA)
+      if(nrow(sub_init) > 0)
+        pp <- pp + ggplot2::geom_line(data = sub_init, ggplot2::aes(x = year, y = biomass_sum),
+                                      color = "black", linewidth = 1.2, linetype = "22")
       if(nrow(sub_ens) > 0)
         pp <- pp + ggplot2::geom_line(data = sub_ens, ggplot2::aes(x = year, y = biomass_sum),
                                       color = this_color, linewidth = 1.8)
@@ -3996,7 +4122,7 @@ plot_region_timeseries_grid <- function(run_dir = NULL, init_run_dir = NULL, gro
     pp <- pp + ggplot2::labs(title = lbl, x = "Year", y = "Biomass (t)", shape = "Observed")
     pp <- pp + ggplot2::theme_bw(base_size = base_size)
     pp <- pp + ggplot2::theme(plot.title = ggplot2::element_text(size = base_size * 1.05, face = "bold",
-                                                                 color = "black", margin = ggplot2::margin(b = 0),
+                                                                 color = if(use_lines) this_color else "black", margin = ggplot2::margin(b = 0),
                                                                  vjust = 0.2),
                               plot.margin = ggplot2::margin(2, 2, 2, 2),
                               aspect.ratio = 1)
@@ -4064,6 +4190,9 @@ plot_region_timeseries_grid <- function(run_dir = NULL, init_run_dir = NULL, gro
     if(!is.null(domain_data)){
       domain_data$ens_mean_df <- domain_ens_mean_df
       domain_data$ribbon_df   <- domain_ribbon_df
+      if(use_lines && !is.null(cand_domain_df)){
+        domain_data$cand_df <- cand_domain_df; domain_data$fit_lim <- fit_lim; domain_data$palette <- palette
+      }
       pp_domain <- .build_domain_wide_panel(domain_data, init_run_dir, base_size,
                                             show_ensemble = show_ensemble)
       pp_domain <- pp_domain + ggplot2::theme(plot.margin = ggplot2::margin(2, 2, 2, 2), aspect.ratio = 1)
@@ -4098,7 +4227,22 @@ plot_region_timeseries_grid <- function(run_dir = NULL, init_run_dir = NULL, gro
   )
   map_area <- patchwork::area(1, 1, 2, 2)
   design <- Reduce(c, c(list(map_area), panel_cells[seq_len(min(n_panels, 6))]))
-  combined <- patchwork::wrap_plots(c(list(map_panel), ordered_panels[seq_len(min(n_panels, 6))]), design = design)
+  bar_w <- 0.14
+  if(use_lines){
+    # NLL colorbar = a real panel in a 6th column spanning both rows, built with the same
+    # title/axis rows as the time-series panels so its box lines up with theirs
+    bar <- .nll_bar_plot(fit_lim, palette, base_size = base_size,
+                         title_size = base_size * 1.05, axis_title_size = base_size,
+                         axis_text_size = base_size * 0.8)
+    design <- c(design, patchwork::area(1, 6, 2, 6))
+    combined <- patchwork::wrap_plots(c(list(map_panel), ordered_panels[seq_len(min(n_panels, 6))], list(bar)),
+                                      design = design, widths = c(1, 1, 1, 1, 1, bar_w))
+    leg <- .ref_line_legend(base_size = base_size * 0.85, key_cm = 2.6, has_baseline = !is.null(init_run_dir))
+    if(!is.null(leg))
+      combined <- (combined / leg) + patchwork::plot_layout(heights = c(1, 0.06))
+  } else {
+    combined <- patchwork::wrap_plots(c(list(map_panel), ordered_panels[seq_len(min(n_panels, 6))]), design = design)
+  }
   
   if(is.null(png_file)) png_file <- paste0("region_timeseries_", gsub("[^A-Za-z0-9._-]+", "_", group_token), ".png")
   if(!dir.exists(plots_dir)) dir.create(plots_dir, recursive = TRUE, showWarnings = FALSE)
@@ -4107,8 +4251,8 @@ plot_region_timeseries_grid <- function(run_dir = NULL, init_run_dir = NULL, gro
   # single-panel "unit" is consistent between the 2x2 map block and the 1x1 time
   # series cells
   unit_size <- height / 2
-  out_width  <- unit_size * 5
-  out_height <- unit_size * 2
+  out_width  <- unit_size * (5 + if(use_lines) bar_w else 0)
+  out_height <- unit_size * 2 * (if(use_lines) 1.06 else 1)
   ggplot2::ggsave(out_path, plot = combined, width = out_width, height = out_height, dpi = dpi, units = "in")
   message("Wrote ", out_path, " (", n_panels, " panel(s), ",
           round(out_width, 1), "x", round(out_height, 1), "in, 5x2 grid layout, map bigger, no arrows).")
@@ -4233,7 +4377,21 @@ plot_region_timeseries_grid <- function(run_dir = NULL, init_run_dir = NULL, gro
   pp <- ggplot2::ggplot()
   sub_init <- domain_df[domain_df$run == "init", , drop = FALSE]
   sub_best <- domain_df[domain_df$run == "best-fit", , drop = FALSE]
-  if(show_ensemble && !is.null(ens_mean_df)){
+  if(show_ensemble && !is.null(domain_data$cand_df)){
+    sub_c <- domain_data$cand_df
+    sub_c <- sub_c[order(-sub_c$fitness, sub_c$run_folder, sub_c$year), , drop = FALSE]
+    sub_c$run_folder <- factor(sub_c$run_folder, levels = unique(sub_c$run_folder))
+    pp <- pp + ggplot2::geom_line(data = sub_c,
+                                  ggplot2::aes(x = year, y = biomass_sum, group = run_folder, colour = fitness),
+                                  linewidth = 0.5, alpha = 0.55)
+    if(nrow(sub_init) > 0)
+      pp <- pp + ggplot2::geom_line(data = sub_init, ggplot2::aes(x = year, y = value),
+                                    color = "black", linewidth = 1.4, linetype = "22")
+    if(nrow(sub_best) > 0)
+      pp <- pp + ggplot2::geom_line(data = sub_best, ggplot2::aes(x = year, y = value),
+                                    color = "#20B2AA", linewidth = 1.6, linetype = "22")
+    pp <- pp + .nll_scale(domain_data$fit_lim, domain_data$palette)
+  } else if(show_ensemble && !is.null(ens_mean_df)){
     # ONLY the AIC-weighted domain-wide mean + its 95% CI ribbon -- black, since this
     # panel has no region-specific color the way individual region panels do. init
     # and best-fit are deliberately NOT drawn here, matching the per-region panels'
@@ -4242,6 +4400,9 @@ plot_region_timeseries_grid <- function(run_dir = NULL, init_run_dir = NULL, gro
       pp <- pp + ggplot2::geom_ribbon(data = ribbon_df,
                                       ggplot2::aes(x = year, ymin = pmax(lo, 0), ymax = hi),
                                       fill = "black", alpha = 0.20, colour = NA)
+    if(nrow(sub_init) > 0)
+      pp <- pp + ggplot2::geom_line(data = sub_init, ggplot2::aes(x = year, y = value),
+                                    color = "black", linewidth = 1.2, linetype = "22")
     pp <- pp + ggplot2::geom_line(data = ens_mean_df, ggplot2::aes(x = year, y = value),
                                   color = "black", linewidth = 1.8)
   } else {
@@ -6200,24 +6361,24 @@ plot_ecospace_ensemble_m0 <- function(map_root_dir,
                                       y_lab            = NULL,
                                       plots_dir        = "plots",
                                       width = 11, height = 8, dpi = 150){
-
+  
   if(!requireNamespace("ggplot2", quietly = TRUE))
     stop("Package 'ggplot2' is required. Install it with install.packages('ggplot2').")
-
+  
   if(!requireNamespace("data.table", quietly = TRUE))
     stop("Package 'data.table' is required. Install it with install.packages('data.table').")
-
+  
   if(!requireNamespace("patchwork", quietly = TRUE))
     stop("Package 'patchwork' is required. Install it with install.packages('patchwork').")
-
+  
   ens_mode <- match.arg(ens_mode)
-
+  
   valid <- ga_runs[
     ga_runs$exists,
     ,
     drop = FALSE
   ]
-
+  
   sel <- select_ensemble_candidates(
     valid,
     mode = ens_mode,
@@ -6226,7 +6387,7 @@ plot_ecospace_ensemble_m0 <- function(map_root_dir,
     top_n_prop = top_n_prop,
     target_ess = target_ess
   )
-
+  
   weights_by_folder <- if(ens_mode == "aic")
     stats::setNames(
       sel$ens_weight,
@@ -6234,27 +6395,27 @@ plot_ecospace_ensemble_m0 <- function(map_root_dir,
     )
   else
     NULL
-
+  
   if(is.null(run_folders))
     run_folders <- list.dirs(
       map_root_dir,
       recursive = FALSE,
       full.names = TRUE
     )
-
+  
   # restrict to the selected candidates (by folder basename matching run_folder) --
   # for "aic" mode this is every candidate (weights applied later), for
   # "quantile"/"topN" it's the hard-selected subset
   run_folders <- run_folders[
     basename(run_folders) %in% sel$run_folder
   ]
-
+  
   if(length(run_folders) == 0)
     stop(
       "No subfolders under map_root_dir matched the selected candidates ",
       "(ens_mode = '", ens_mode, "')."
     )
-
+  
   message(
     "plot_ecospace_ensemble_m0(): ",
     length(run_folders),
@@ -6264,14 +6425,14 @@ plot_ecospace_ensemble_m0 <- function(map_root_dir,
     map_root_dir,
     "."
   )
-
+  
   if(length(run_folders) > max_folders){
-
+    
     run_folders <- sample(
       run_folders,
       max_folders
     )
-
+    
     message(
       "  subsampling to ",
       max_folders,
@@ -6279,35 +6440,35 @@ plot_ecospace_ensemble_m0 <- function(map_root_dir,
       "(raise max_folders to use more/all of them)."
     )
   }
-
+  
   all_list <- list()
   n_found <- 0
-
+  
   for(rf in run_folders){
-
+    
     path <- file.path(
       rf,
       "M0_loss_rate.csv"
     )
-
+    
     if(!file.exists(path))
       next
-
+    
     m0 <- tryCatch(
       read_m0_loss_rate(path),
       error = function(e) NULL
     )
-
+    
     if(is.null(m0))
       next
-
+    
     m0$candidate <- basename(rf)
-
+    
     all_list[[length(all_list) + 1]] <- m0
-
+    
     n_found <- n_found + 1
   }
-
+  
   message(
     "plot_ecospace_ensemble_m0(): ",
     n_found,
@@ -6315,17 +6476,17 @@ plot_ecospace_ensemble_m0 <- function(map_root_dir,
     length(run_folders),
     " folder(s) had M0_loss_rate.csv."
   )
-
+  
   if(n_found == 0)
     stop(
       "No M0_loss_rate.csv files found in any checked folder."
     )
-
+  
   all_df <- do.call(
     rbind,
     all_list
   )
-
+  
   if(is.null(groups))
     groups <- setdiff(
       names(all_df),
@@ -6334,12 +6495,12 @@ plot_ecospace_ensemble_m0 <- function(map_root_dir,
         "candidate"
       )
     )
-
+  
   missing_g <- setdiff(
     groups,
     names(all_df)
   )
-
+  
   if(length(missing_g) > 0)
     stop(
       "plot_ecospace_ensemble_m0(): group(s) not found: ",
@@ -6348,12 +6509,12 @@ plot_ecospace_ensemble_m0 <- function(map_root_dir,
         collapse = ", "
       )
     )
-
+  
   # assign each group column to whichever species pattern it matches first
   species_of <- vapply(
     groups,
     function(g){
-
+      
       hit <- species_patterns[
         vapply(
           species_patterns,
@@ -6366,7 +6527,7 @@ plot_ecospace_ensemble_m0 <- function(map_root_dir,
           logical(1)
         )
       ]
-
+      
       if(length(hit) == 0)
         NA_character_
       else
@@ -6374,11 +6535,11 @@ plot_ecospace_ensemble_m0 <- function(map_root_dir,
     },
     character(1)
   )
-
+  
   ungrouped <- groups[
     is.na(species_of)
   ]
-
+  
   if(length(ungrouped) > 0)
     message(
       "plot_ecospace_ensemble_m0(): ",
@@ -6389,45 +6550,45 @@ plot_ecospace_ensemble_m0 <- function(map_root_dir,
         collapse = ", "
       )
     )
-
+  
   safe_name <- function(s)
     gsub(
       "[^A-Za-z0-9._-]+",
       "_",
       s
     )
-
+  
   if(!dir.exists(plots_dir))
     dir.create(
       plots_dir,
       recursive = TRUE,
       showWarnings = FALSE
     )
-
+  
   summary_rows <- list()
-
+  
   for(sp in unique(species_patterns)){
-
+    
     sp_groups <- groups[
       !is.na(species_of) &
         species_of == sp
     ]
-
+    
     if(length(sp_groups) == 0){
-
+      
       message(
         "  [skip] '",
         sp,
         "': no matching column(s) in M0_loss_rate.csv."
       )
-
+      
       next
     }
-
+    
     dt <- data.table::as.data.table(
       all_df
     )
-
+    
     long <- data.table::melt(
       dt,
       id.vars = c(
@@ -6438,21 +6599,21 @@ plot_ecospace_ensemble_m0 <- function(map_root_dir,
       variable.name = "group",
       value.name = "value"
     )
-
+    
     if(ens_mode == "aic"){
-
+      
       long$w <- weights_by_folder[
         long$candidate
       ]
-
+      
       agg <- long[, {
-
+        
         wm <- stats::weighted.mean(
           value,
           w,
           na.rm = TRUE
         )
-
+        
         qs <- weighted_quantile(
           value,
           w,
@@ -6461,7 +6622,7 @@ plot_ecospace_ensemble_m0 <- function(map_root_dir,
             0.95
           )
         )
-
+        
         .(
           mean_val = wm,
           lo = qs[1],
@@ -6470,14 +6631,14 @@ plot_ecospace_ensemble_m0 <- function(map_root_dir,
             !is.na(value)
           )
         )
-
+        
       }, by = .(
         year,
         group
       )]
-
+      
     } else {
-
+      
       agg <- long[, .(
         mean_val = mean(
           value,
@@ -6494,25 +6655,25 @@ plot_ecospace_ensemble_m0 <- function(map_root_dir,
         year,
         group
       )]
-
+      
       agg[, `:=`(
         lo = mean_val - sd_val,
         hi = mean_val + sd_val
       )]
     }
-
+    
     agg_df <- as.data.frame(
       agg
     )
-
+    
     agg_df$group <- factor(
       agg_df$group,
       levels = sp_groups
     )
-
+    
     ens_label <- switch(
       ens_mode,
-
+      
       quantile = paste0(
         sp,
         " (best ",
@@ -6523,7 +6684,7 @@ plot_ecospace_ensemble_m0 <- function(map_root_dir,
         n_found,
         ")"
       ),
-
+      
       topN = paste0(
         sp,
         " (top ",
@@ -6532,7 +6693,7 @@ plot_ecospace_ensemble_m0 <- function(map_root_dir,
         n_found,
         ")"
       ),
-
+      
       aic = paste0(
         sp,
         " (AIC-weighted, ESS~",
@@ -6544,12 +6705,12 @@ plot_ecospace_ensemble_m0 <- function(map_root_dir,
         ")"
       )
     )
-
+    
     if(single_plot){
-
+      
       # ---- single combined plot: total is removed completely.
       # Only age/group lines are shown in the plot and legend.
-
+      
       group_names <- tolower(
         trimws(
           as.character(
@@ -6557,25 +6718,25 @@ plot_ecospace_ensemble_m0 <- function(map_root_dir,
           )
         )
       )
-
+      
       is_total <- grepl(
         "total",
         group_names
       )
-
+      
       agg_single <- agg_df[
         !is_total,
         ,
         drop = FALSE
       ]
-
+      
       # Re-factor after removing total so the legend contains
       # only the remaining groups.
-
+      
       agg_single$group <- droplevels(
         agg_single$group
       )
-
+      
       p <- ggplot2::ggplot(
         agg_single,
         ggplot2::aes(
@@ -6584,14 +6745,14 @@ plot_ecospace_ensemble_m0 <- function(map_root_dir,
           color = group
         )
       )
-
+      
       # --------------------------------------------------------
       # Uncertainty
       # --------------------------------------------------------
-
+      
       if(single_plot_uncertainty &&
          nrow(agg_single) > 0){
-
+        
         p <- p +
           ggplot2::geom_ribbon(
             data = agg_single,
@@ -6610,13 +6771,13 @@ plot_ecospace_ensemble_m0 <- function(map_root_dir,
             show.legend = FALSE
           )
       }
-
+      
       # --------------------------------------------------------
       # Mean lines
       # --------------------------------------------------------
-
+      
       if(nrow(agg_single) > 0){
-
+        
         p <- p +
           ggplot2::geom_line(
             data = agg_single,
@@ -6629,11 +6790,11 @@ plot_ecospace_ensemble_m0 <- function(map_root_dir,
             alpha = 0.75
           )
       }
-
+      
       # --------------------------------------------------------
       # Scales and theme
       # --------------------------------------------------------
-
+      
       p <- p +
         ggplot2::scale_x_continuous(
           breaks = scales::pretty_breaks(
@@ -6676,7 +6837,7 @@ plot_ecospace_ensemble_m0 <- function(map_root_dir,
           base_size = 12
         ) +
         ggplot2::theme(
-
+          
           plot.title = ggplot2::element_text(
             size = 13,
             face = "bold",
@@ -6688,7 +6849,7 @@ plot_ecospace_ensemble_m0 <- function(map_root_dir,
               0
             )
           ),
-
+          
           # Major grid
           panel.grid.major = ggplot2::element_line(
             colour = scales::alpha(
@@ -6698,7 +6859,7 @@ plot_ecospace_ensemble_m0 <- function(map_root_dir,
             linetype = "dashed",
             linewidth = 0.35
           ),
-
+          
           # Minor grid, with a vertical line at every year
           panel.grid.minor = ggplot2::element_line(
             colour = scales::alpha(
@@ -6708,10 +6869,10 @@ plot_ecospace_ensemble_m0 <- function(map_root_dir,
             linetype = "dashed",
             linewidth = 0.20
           ),
-
+          
           legend.position = "right"
         )
-
+      
       out_path <- file.path(
         plots_dir,
         paste0(
@@ -6722,9 +6883,9 @@ plot_ecospace_ensemble_m0 <- function(map_root_dir,
           ".png"
         )
       )
-
+      
       print(p)
-
+      
       ggplot2::ggsave(
         out_path,
         plot = p,
@@ -6733,7 +6894,7 @@ plot_ecospace_ensemble_m0 <- function(map_root_dir,
         dpi = dpi,
         units = "in"
       )
-
+      
       message(
         "Wrote ",
         out_path,
@@ -6741,7 +6902,7 @@ plot_ecospace_ensemble_m0 <- function(map_root_dir,
         ens_label,
         ")"
       )
-
+      
       summary_rows[[length(summary_rows) + 1]] <-
         data.frame(
           species = sp,
@@ -6751,10 +6912,10 @@ plot_ecospace_ensemble_m0 <- function(map_root_dir,
           png_file = out_path,
           stringsAsFactors = FALSE
         )
-
+      
       next
     }
-
+    
     # manually-built panels (not facet_wrap()) arranged in a fixed 4-column grid,
     # with an explicit blank cell after the 3rd group -- e.g. for gag's 7 groups
     # (0-5+ plus "total"): row 1 = gag 0, gag 1, gag 2, BLANK;
@@ -6774,18 +6935,18 @@ plot_ecospace_ensemble_m0 <- function(map_root_dir,
     insert_at_grid <- n_panels_grid %% facet_ncol
     if(insert_at_grid == 0) insert_at_grid <- n_panels_grid
     n_rows_total <- n_cells_grid / facet_ncol
-
+    
     panel_list <- list()
-
+    
     for(gi in seq_along(sp_groups)){
       gname <- sp_groups[gi]
-
+      
       sub <- agg_df[
         agg_df$group == gname,
         ,
         drop = FALSE
       ]
-
+      
       # this panel's FINAL position in the grid, after blank insertion (see the
       # layout note above) -- panels at or before insert_at_grid keep their original
       # position; panels after it shift right by n_blanks_grid to make room for the
@@ -6795,7 +6956,7 @@ plot_ecospace_ensemble_m0 <- function(map_root_dir,
       col_pos <- ((final_pos - 1) %% facet_ncol) + 1
       show_x_axis <- (row_pos == n_rows_total)
       show_y_axis <- (col_pos == 1)
-
+      
       pp <- ggplot2::ggplot(
         sub,
         ggplot2::aes(
@@ -6829,7 +6990,7 @@ plot_ecospace_ensemble_m0 <- function(map_root_dir,
           base_size = 11
         ) +
         ggplot2::theme(
-
+          
           plot.title = ggplot2::element_text(
             size = 11,
             face = "bold",
@@ -6841,7 +7002,7 @@ plot_ecospace_ensemble_m0 <- function(map_root_dir,
               0
             )
           ),
-
+          
           panel.grid.major = ggplot2::element_line(
             colour = scales::alpha(
               "grey25",
@@ -6850,7 +7011,7 @@ plot_ecospace_ensemble_m0 <- function(map_root_dir,
             linetype = "dashed",
             linewidth = 0.35
           ),
-
+          
           panel.grid.minor = ggplot2::element_line(
             colour = scales::alpha(
               "grey35",
@@ -6859,20 +7020,20 @@ plot_ecospace_ensemble_m0 <- function(map_root_dir,
             linetype = "dashed",
             linewidth = 0.20
           ),
-
+          
           axis.title.x = if(show_x_axis) ggplot2::element_text() else ggplot2::element_blank(),
           axis.text.x  = if(show_x_axis) ggplot2::element_text() else ggplot2::element_blank(),
           axis.ticks.x = if(show_x_axis) ggplot2::element_line() else ggplot2::element_blank(),
           axis.title.y = if(show_y_axis) ggplot2::element_text() else ggplot2::element_blank(),
           axis.text.y  = if(show_y_axis) ggplot2::element_text() else ggplot2::element_blank(),
           axis.ticks.y = if(show_y_axis) ggplot2::element_line() else ggplot2::element_blank(),
-
+          
           aspect.ratio = 1
         )
-
+      
       panel_list[[gname]] <- pp
     }
-
+    
     # reuse the grid dimensions already computed before the loop (n_panels_grid ==
     # length(panel_list) always, since every sp_groups entry produced exactly one
     # panel) -- no need to recompute them
@@ -6887,7 +7048,7 @@ plot_ecospace_ensemble_m0 <- function(map_root_dir,
         seq_len(n_blanks_grid)
       )
     )
-
+    
     full_list <-
       if(n_blanks_grid > 0)
         c(
@@ -6902,14 +7063,14 @@ plot_ecospace_ensemble_m0 <- function(map_root_dir,
               insert_at_grid
           ]
         )
-      else
-        panel_list
-
+    else
+      panel_list
+    
     p <- patchwork::wrap_plots(
       full_list,
       ncol = facet_ncol
     )
-
+    
     out_path <- file.path(
       plots_dir,
       paste0(
@@ -6920,7 +7081,7 @@ plot_ecospace_ensemble_m0 <- function(map_root_dir,
         ".png"
       )
     )
-
+    
     ggplot2::ggsave(
       out_path,
       plot = p,
@@ -6929,7 +7090,7 @@ plot_ecospace_ensemble_m0 <- function(map_root_dir,
       dpi = dpi,
       units = "in"
     )
-
+    
     message(
       "Wrote ",
       out_path,
@@ -6937,7 +7098,7 @@ plot_ecospace_ensemble_m0 <- function(map_root_dir,
       ens_label,
       ")"
     )
-
+    
     summary_rows[[length(summary_rows) + 1]] <-
       data.frame(
         species = sp,
@@ -6948,7 +7109,7 @@ plot_ecospace_ensemble_m0 <- function(map_root_dir,
         stringsAsFactors = FALSE
       )
   }
-
+  
   invisible(
     do.call(
       rbind,
@@ -7122,15 +7283,6 @@ read_ga_pop <- function(path){
 #'   fish)" becomes two lines reading "gag5+" then "demersalfish" -- a narrower title
 #'   at the cost of extra vertical space inside the title annotation itself. FALSE
 #'   (default) keeps the single-line "V(...)" form.
-#' @param max_title_chars Optional integer. When supplied, truncates any panel title
-#'   longer than this many characters. Only the PREY name is cut on vulnerability
-#'   panels (predator names are almost always short, e.g. "gag1", so trimming the
-#'   longer, more variable prey name preserves the more identifying part of the
-#'   label) -- e.g. "V(gag1/pelagicpiscivores)" at max_title_chars=20 truncates to
-#'   "V(gag1/pelagicpisc)", no ellipsis added (ggplot2 can't measure rendered text
-#'   width at build time, so this is a character-count approximation of "does it fit
-#'   the panel", not an exact one -- tune the number empirically against your own
-#'   facet_ncol/base_size/figure width). NULL (default) = no truncation.
 #' @param plots_dir,png_file Output folder/filename.
 #' @param save_plot Logical, default TRUE. FALSE skips writing the PNG (the plot is
 #'   still built and returned via attr(), see @return) -- useful when this call's
@@ -7155,6 +7307,7 @@ plot_ga_final_pop_distributions <- function(gapop_final, gapop_init, ga_runs,
                                             catalog = NULL, group_names = NULL,
                                             species_patterns = "gag",
                                             types = NULL,
+                                            parvec = NULL,
                                             vul_bounds = c(1.01, 1e6),
                                             env_bounds = c(0.5, 1.5),
                                             redtide_inflection_bounds = c(0.5, 2.0),
@@ -7164,20 +7317,25 @@ plot_ga_final_pop_distributions <- function(gapop_final, gapop_init, ga_runs,
                                             facet_ncol = 8, base_size = 11,
                                             overall_title = NULL,
                                             title_inside = FALSE,
+                                            max_title_chars = 11,
                                             abbreviate_minlength = NULL,
                                             title_two_line = FALSE,
-                                            max_title_chars = NULL,
                                             plots_dir = "plots", png_file = NULL, save_plot = TRUE,
                                             width = NULL, height = NULL, dpi = 200){
   if(!requireNamespace("ggplot2", quietly = TRUE))
     stop("Package 'ggplot2' is required. Install it with install.packages('ggplot2').")
   if(!requireNamespace("patchwork", quietly = TRUE))
     stop("Package 'patchwork' is required. Install it with install.packages('patchwork').")
-
+  
   param_cols <- setdiff(names(gapop_final), "gapop_row")
+  # `parvec`: path to (or data.frame of) parvec_<label>.csv. When supplied, every parameter
+  # uses ITS OWN search bounds (L.bounds / U.bounds) instead of the type-wide defaults below.
+  if(is.character(parvec)) parvec <- utils::read.csv(parvec, row.names = 1, check.names = FALSE)
+  if(!is.null(parvec) && !all(c("L.bounds", "U.bounds") %in% names(parvec)))
+    stop("`parvec` needs columns L.bounds and U.bounds.")
   baseline_row <- gapop_init[gapop_init$gapop_row == 1, param_cols, drop = FALSE]
   baseline <- stats::setNames(as.numeric(baseline_row[1, ]), param_cols)
-
+  
   best_gapop_row <- ga_runs$gapop_row[which.min(ga_runs$fitness)]
   best_row <- gapop_final[gapop_final$gapop_row == best_gapop_row, param_cols, drop = FALSE]
   if(nrow(best_row) == 0)
@@ -7188,393 +7346,1228 @@ plot_ga_final_pop_distributions <- function(gapop_final, gapop_init, ga_runs,
   best_fitness <- min(ga_runs$fitness, na.rm = TRUE)
   message("plot_ga_final_pop_distributions(): best-fit candidate is gapop_row ",
           best_gapop_row, " (fitness = ", signif(best_fitness, 6), ").")
-
+  
   parsed <- lapply(param_cols, .parse_gapop_colname)
   names(parsed) <- param_cols
   ptype <- vapply(parsed, function(p) p$type, character(1))
-
+  
   if(!is.null(types)) param_cols <- param_cols[ptype %in% types]
-
+  
   # ---- species resolution + filtering ----
   resolve_species <- function(col){
     p <- parsed[[col]]
+    
     if(p$type == "vul" && !is.null(group_names)){
-      nms <- c(if(!is.na(p$pred) && (p$pred + 1L) <= length(group_names)) group_names[p$pred + 1L] else NA,
-              if(!is.na(p$prey) && (p$prey + 1L) <= length(group_names)) group_names[p$prey + 1L] else NA)
+      nms <- c(
+        if(!is.na(p$pred) && (p$pred + 1L) <= length(group_names))
+          group_names[p$pred + 1L] else NA,
+        if(!is.na(p$prey) && (p$prey + 1L) <= length(group_names))
+          group_names[p$prey + 1L] else NA
+      )
       nms <- nms[!is.na(nms) & nzchar(nms)]
       if(length(nms) == 0) return(NA_character_)
       paste(nms, collapse = " / ")
+      
     } else if(p$type == "disp" && !is.null(group_names)){
-      if(!is.na(p$pred) && (p$pred + 1L) <= length(group_names)) group_names[p$pred + 1L] else NA_character_
+      if(!is.na(p$pred) && (p$pred + 1L) <= length(group_names))
+        group_names[p$pred + 1L] else NA_character_
+      
     } else if(p$type %in% c("env", "redtide") && !is.null(catalog)){
       row.i <- which(catalog$group_index == p$fxn_num)
       if(length(row.i) == 0) return(NA_character_)
       catalog$group_name[row.i[1]]
+      
     } else {
       NA_character_
     }
   }
+  
   species_of <- vapply(param_cols, resolve_species, character(1))
-
+  
   if(!is.null(species_patterns)){
     keep <- vapply(species_of, function(nm){
       if(is.na(nm)) return(FALSE)
-      any(vapply(species_patterns, function(p) grepl(p, nm, ignore.case = TRUE), logical(1)))
+      any(vapply(species_patterns, function(p)
+        grepl(p, nm, ignore.case = TRUE), logical(1)))
     }, logical(1))
+    
     if(sum(keep) == 0)
       stop("plot_ga_final_pop_distributions(): no parameters matched species_patterns = ",
-           paste(species_patterns, collapse = ", "), " -- check group_names/catalog are ",
-           "supplied and species_patterns match their naming (e.g. 'gag', not 'Gag').")
+           paste(species_patterns, collapse = ", "),
+           " -- check group_names/catalog are supplied and species_patterns ",
+           "match their naming (e.g. 'gag', not 'Gag').")
+    
     param_cols <- param_cols[keep]
     species_of <- species_of[keep]
   }
-
-  message("plot_ga_final_pop_distributions(): ", length(param_cols), " parameter(s) selected ",
-          "after type/species filtering.")
-
+  
+  message("plot_ga_final_pop_distributions(): ", length(param_cols),
+          " parameter(s) selected after type/species filtering.")
+  
   # ---- per-parameter bounds + summary row ----
   get_bounds <- function(col){
     p <- parsed[[col]]
-    if(p$type == "vul") return(vul_bounds)
-    if(p$type == "disp") return(baseline[col] * c(1 - 2 * disp_cv, 1 + 2 * disp_cv))
-    if(p$type == "env")  return(env_bounds)
+    
+    if(!is.null(parvec) && col %in% rownames(parvec))
+      return(c(parvec[col, "L.bounds"], parvec[col, "U.bounds"]))
+    
+    if(p$type == "vul")
+      return(vul_bounds)
+    
+    if(p$type == "disp")
+      return(baseline[col] * c(1 - 2 * disp_cv, 1 + 2 * disp_cv))
+    
+    if(p$type == "env")
+      return(env_bounds)
+    
     if(p$type == "redtide")
-      return(if(grepl("inflection", p$subparam)) redtide_inflection_bounds else redtide_slope_bounds)
+      return(
+        if(grepl("inflection", p$subparam))
+          redtide_inflection_bounds
+        else
+          redtide_slope_bounds
+      )
+    
     c(NA_real_, NA_real_)
   }
-
+  
   summary_rows <- list()
+  
   for(col in param_cols){
     b <- get_bounds(col)
     p <- parsed[[col]]
     onlog <- p$type == "vul"
     val <- best[col]
-    pct <- if(onlog) (log(val) - log(b[1])) / (log(b[2]) - log(b[1])) * 100
-    else (val - b[1]) / (b[2] - b[1]) * 100
+    
+    pct <- if(onlog)
+      (log(val) - log(b[1])) / (log(b[2]) - log(b[1])) * 100
+    else
+      (val - b[1]) / (b[2] - b[1]) * 100
+    
     summary_rows[[col]] <- data.frame(
-      param = col, type = p$type, group = p$group,
-      species = species_of[col], baseline = baseline[col], best_fit = val,
-      lower_bound = b[1], upper_bound = b[2], pct_of_range = round(pct, 1),
-      at_bound = !is.na(pct) && (pct <= at_bound_pct || pct >= 100 - at_bound_pct),
-      stringsAsFactors = FALSE)
+      param = col,
+      type = p$type,
+      group = p$group,
+      species = species_of[col],
+      baseline = baseline[col],
+      best_fit = val,
+      lower_bound = b[1],
+      upper_bound = b[2],
+      pct_of_range = round(pct, 1),
+      at_bound = !is.na(pct) &&
+        (pct <= at_bound_pct || pct >= 100 - at_bound_pct),
+      stringsAsFactors = FALSE
+    )
   }
+  
   summary_df <- do.call(rbind, summary_rows)
   rownames(summary_df) <- NULL
+  
   n_at_bound <- sum(summary_df$at_bound)
-  message("plot_ga_final_pop_distributions(): ", n_at_bound, " of ", nrow(summary_df),
-          " selected parameter(s) landed within ", at_bound_pct, "% of a search bound.")
-
+  
+  message("plot_ga_final_pop_distributions(): ", n_at_bound, " of ",
+          nrow(summary_df),
+          " selected parameter(s) landed within ", at_bound_pct,
+          "% of a search bound.")
+  
   # ---- build panels: histogram for vul/disp, response curve for env/redtide ----
   # Panels are ordered by TYPE first (vul, then env, redtide, disp), then by STANZA
-  # NUMBER within each type -- e.g. every gag0 vul panel, then every gag1 vul panel,
-  # etc. -- rather than the arbitrary order the GA's own par.labels happened to list
-  # parameters in.
-  groups_to_plot <- unique(vapply(param_cols, function(c) parsed[[c]]$group, character(1)))
-  group_type <- vapply(groups_to_plot, function(g)
-    parsed[[param_cols[vapply(param_cols, function(c) parsed[[c]]$group, character(1)) == g][1]]]$type,
-    character(1))
-  type_rank <- c(vul = 1L, env = 2L, redtide = 3L, disp = 4L, fleetdyn = 5L, med = 6L, other = 7L)[group_type]
-
+  # NUMBER within each type.
+  
+  groups_to_plot <- unique(vapply(
+    param_cols,
+    function(c) parsed[[c]]$group,
+    character(1)
+  ))
+  
+  group_type <- vapply(
+    groups_to_plot,
+    function(g)
+      parsed[[
+        param_cols[
+          vapply(
+            param_cols,
+            function(c) parsed[[c]]$group,
+            character(1)
+          ) == g
+        ][1]
+      ]]$type,
+    character(1)
+  )
+  
+  type_rank <- c(
+    vul = 1L,
+    env = 2L,
+    redtide = 3L,
+    disp = 4L,
+    fleetdyn = 5L,
+    med = 6L,
+    other = 7L
+  )[group_type]
+  
   .stanza_number <- function(name){
     if(is.na(name)) return(NA_real_)
-    # species_of for vul is a combined "pred_name / prey_name" string, so the stanza
-    # number isn't necessarily at the string's end -- search for a number following
-    # one of the matched species_patterns specifically (e.g. "gag 4" inside
-    # "gag 4 / demersal fish"), falling back to any trailing number in the string.
+    
     pat <- if(!is.null(species_patterns))
-      paste0("(", paste(species_patterns, collapse = "|"), ")\\s*(\\d+)\\+?") else "(\\d+)\\+?\\s*$"
-    m <- regmatches(name, regexpr(pat, name, ignore.case = TRUE))
+      paste0(
+        "(",
+        paste(species_patterns, collapse = "|"),
+        ")\\s*(\\d+)\\+?"
+      )
+    else
+      "(\\d+)\\+?\\s*$"
+    
+    m <- regmatches(
+      name,
+      regexpr(pat, name, ignore.case = TRUE)
+    )
+    
     if(length(m) == 0 || !nzchar(m)){
-      m2 <- regmatches(name, regexpr("(\\d+)\\+?\\s*$", name))
-      if(length(m2) == 0 || !nzchar(m2)) return(NA_real_)
+      m2 <- regmatches(
+        name,
+        regexpr("(\\d+)\\+?\\s*$", name)
+      )
+      
+      if(length(m2) == 0 || !nzchar(m2))
+        return(NA_real_)
+      
       return(as.numeric(gsub("\\+", "", m2)))
     }
+    
     num <- regmatches(m, regexpr("\\d+", m))
     as.numeric(num)
   }
-  group_stanza <- vapply(groups_to_plot, function(g){
-    cols_g <- param_cols[vapply(param_cols, function(c) parsed[[c]]$group, character(1)) == g]
-    p1 <- parsed[[cols_g[1]]]
-    if(p1$type %in% c("vul", "disp")){
-      .stanza_number(species_of[cols_g[1]])
-    } else if(p1$type %in% c("env", "redtide")){
-      .stanza_number(species_of[cols_g[1]])
-    } else {
-      NA_real_
-    }
-  }, numeric(1))
-
-  groups_to_plot <- groups_to_plot[order(type_rank, group_stanza, groups_to_plot)]
+  
+  group_stanza <- vapply(
+    groups_to_plot,
+    function(g){
+      cols_g <- param_cols[
+        vapply(
+          param_cols,
+          function(c) parsed[[c]]$group,
+          character(1)
+        ) == g
+      ]
+      
+      p1 <- parsed[[cols_g[1]]]
+      
+      if(p1$type %in% c("vul", "disp")){
+        .stanza_number(species_of[cols_g[1]])
+      } else if(p1$type %in% c("env", "redtide")){
+        .stanza_number(species_of[cols_g[1]])
+      } else {
+        NA_real_
+      }
+    },
+    numeric(1)
+  )
+  
+  groups_to_plot <- groups_to_plot[
+    order(type_rank, group_stanza, groups_to_plot)
+  ]
+  
   n_groups <- length(groups_to_plot)
   panel_list <- list()
-
-  # driver -> x-axis unit, for env panels (red-tide gets its own "cells/L" unit,
-  # handled separately below since it's not a physical habitat driver)
-  driver_units <- c(depth = "m", temp = "\u00b0C", salinity = "PSU", DO = "mg/L")
-  .nospace <- function(x) gsub("\\s+", "", x)
-  # abbreviate_minlength applies base R's abbreviate() to EACH "/"-separated part
-  # separately (vul labels are "predname/preyname" combined strings) so a long
-  # component gets shortened without abbreviate() mangling the "/" separator itself.
+  
+  # Number of rows is determined before the loop because the x-axis visibility
+  # depends on the location of each panel within the grid.
+  n_rows <- ceiling(n_groups / facet_ncol)
+  
+  # driver -> x-axis unit
+  driver_units <- c(
+    depth = "m",
+    temp = "\u00b0C",
+    salinity = "PSU",
+    DO = "mg/L"
+  )
+  
+  .nospace <- function(x)
+    gsub("\\s+", "", x)
+  
+  # abbreviate_minlength applies abbreviate() separately to each "/"-separated
+  # component.
   .abbrev_label <- function(x){
-    if(is.null(abbreviate_minlength)) return(x)
+    if(is.null(abbreviate_minlength))
+      return(x)
+    
     parts <- strsplit(x, "/", fixed = TRUE)[[1]]
-    paste(unname(abbreviate(parts, minlength = abbreviate_minlength)), collapse = "/")
+    
+    paste(
+      unname(abbreviate(
+        parts,
+        minlength = abbreviate_minlength
+      )),
+      collapse = "/"
+    )
   }
-
+  
+  # Short vulnerability labels
+  .short_vul_label <- function(x) {
+    if(is.na(x) || !nzchar(x))
+      return(x)
+    
+    parts <- trimws(
+      strsplit(.nospace(x), "/", fixed = TRUE)[[1]]
+    )
+    
+    # Remove V1, V2, etc. if present
+    parts <- gsub(
+      "^V[0-9]+[-_:]?",
+      "",
+      parts,
+      ignore.case = TRUE
+    )
+    
+    parts <- vapply(
+      parts,
+      function(z) {
+        if(nchar(z) <= max_title_chars)
+          return(z)
+        
+        substr(z, 1, max_title_chars)
+      },
+      character(1)
+    )
+    
+    paste(parts, collapse = "-")
+  }
+  
   for(idx in seq_along(groups_to_plot)){
+    
     grp <- groups_to_plot[idx]
+    
     col_pos <- ((idx - 1) %% facet_ncol) + 1
+    row_pos <- ceiling(idx / facet_ncol)
+    
     show_y_axis <- (col_pos == 1)
-    panels_in_this_col <- seq(col_pos, n_groups, by = facet_ncol)
+    
+    # Show x-axis labels at the bottom of EACH column.
+    # With 34 panels and 6 columns this gives:
+    #   29-30 on row 5
+    #   31-34 on row 6
+    panels_in_this_col <- seq(
+      col_pos,
+      n_groups,
+      by = facet_ncol
+    )
+    
     show_x_axis <- (idx == max(panels_in_this_col))
-
-    cols_g <- param_cols[vapply(param_cols, function(c) parsed[[c]]$group, character(1)) == grp]
+    
+    cols_g <- param_cols[
+      vapply(
+        param_cols,
+        function(c) parsed[[c]]$group,
+        character(1)
+      ) == grp
+    ]
+    
     p1 <- parsed[[cols_g[1]]]
     sp_label <- species_of[cols_g[1]]
-    sp_clean <- if(!is.na(sp_label)) .abbrev_label(.nospace(sp_label)) else grp
-
+    
     # ---- compact, type-specific title + x-axis label ----
-    # overall_title suppresses the type-prefix in each panel's own title (the type is
-    # already stated once, in the shared figure title) -- see @param overall_title.
-    # title_two_line (vul only): splits the pred/prey label onto two lines and drops
-    # the "V(...)" wrapper entirely -- an alternative to the type-prefix when panels
-    # are packed tight enough that even the short "V(...)" form doesn't fit.
-    # max_title_chars (vul only): truncates an overlong PREY name (keeping the
-    # shorter, usually-short predator name intact) so the title fits within a
-    # character budget -- see @param max_title_chars for why this is a character-
-    # count approximation, not an exact "does it fit the panel" measurement.
     if(p1$type == "vul"){
-      sp_for_title <- sp_clean
-      if(!is.null(max_title_chars)){
-        wrapper_overhead <- if(!is.null(overall_title) || title_two_line) 0L else 3L  # "V(" + ")"
-        budget <- max_title_chars - wrapper_overhead
-        if(nchar(sp_clean) > budget){
-          parts <- strsplit(sp_clean, "/", fixed = TRUE)[[1]]
-          if(length(parts) >= 2){
-            pred <- parts[1]; prey <- paste(parts[-1], collapse = "/")
-            prey_budget <- budget - nchar(pred) - 1L  # -1 for the "/" separator
-            sp_for_title <- if(prey_budget >= 1L) paste0(pred, "/", substr(prey, 1, prey_budget))
-            else substr(sp_clean, 1, max(budget, 1L))
-          } else {
-            sp_for_title <- substr(sp_clean, 1, max(budget, 1L))
-          }
-        }
+      
+      sp_clean <- .short_vul_label(
+        .nospace(sp_label)
+      )
+      
+      title_lab <- if(!is.null(overall_title)){
+        sp_clean
+      } else if(title_two_line){
+        gsub("/", "\n", sp_clean, fixed = TRUE)
+      } else {
+        # unique by construction: numeric predator/prey ids + (untruncated-ish) names
+        paste0("V ", p1$pred, "-", p1$prey, "\n", sp_clean)
       }
-      title_lab <- if(!is.null(overall_title)) sp_for_title
-      else if(title_two_line) gsub("/", "\n", sp_for_title, fixed = TRUE)
-      else paste0("V(", sp_for_title, ")")
+      
       x_lab <- "value"
+      
     } else if(p1$type == "disp"){
-      title_lab <- if(!is.null(overall_title)) sp_clean else paste0("disp(", sp_clean, ")")
+      
+      sp_clean <- if(!is.na(sp_label))
+        .abbrev_label(.nospace(sp_label))
+      else
+        grp
+      
+      title_lab <- if(!is.null(overall_title))
+        sp_clean
+      else
+        paste0("disp(", sp_clean, ")")
+      
       x_lab <- "value"
+      
+    } else if(p1$type == "fleetdyn"){
+      
+      title_lab <- paste0("fleet ", p1$fleet, " ", if(grepl("pow", p1$subparam)) "power" else "effort mult")
+      x_lab <- "value"
+      
     } else if(p1$type == "env"){
-      row.i <- which(catalog$group_index == p1$fxn_num)
-      driver_nm <- if(length(row.i) > 0 && "driver" %in% names(catalog)) catalog$driver[row.i[1]] else "env"
+      
+      sp_clean <- if(!is.na(sp_label))
+        .abbrev_label(.nospace(sp_label))
+      else
+        grp
+      
+      row.i <- which(
+        catalog$group_index == p1$fxn_num
+      )
+      
+      driver_nm <- if(
+        length(row.i) > 0 &&
+        "driver" %in% names(catalog)
+      )
+        catalog$driver[row.i[1]]
+      else
+        "env"
+      
       unit <- driver_units[driver_nm]
-      title_lab <- if(!is.null(overall_title)) sp_clean else paste0(driver_nm, "(", sp_clean, ")")
-      x_lab <- if(!is.na(unit)) paste0(driver_nm, " (", unit, ")") else driver_nm
+      
+      title_lab <- if(!is.null(overall_title))
+        sp_clean
+      else
+        paste0(driver_nm, "(", sp_clean, ")")
+      
+      x_lab <- if(!is.na(unit))
+        paste0(driver_nm, " (", unit, ")")
+      else
+        driver_nm
+      
     } else if(p1$type == "redtide"){
-      row.i <- which(catalog$group_index == p1$fxn_num)
-      rt_type <- if(length(row.i) > 0 && "resp_type" %in% names(catalog)) tolower(catalog$resp_type[row.i[1]]) else NA_character_
-      rt_label <- if(!is.na(rt_type) && grepl("mortal", rt_type)) "RTmort" else
-        if(!is.na(rt_type) && grepl("forag", rt_type)) "RTforag" else "RT"
-      title_lab <- if(!is.null(overall_title)) sp_clean else paste0(rt_label, "(", sp_clean, ")")
+      
+      sp_clean <- if(!is.na(sp_label))
+        .abbrev_label(.nospace(sp_label))
+      else
+        grp
+      
+      row.i <- which(
+        catalog$group_index == p1$fxn_num
+      )
+      
+      rt_type <- if(
+        length(row.i) > 0 &&
+        "resp_type" %in% names(catalog)
+      ){
+        tolower(catalog$resp_type[row.i[1]])
+      } else {
+        NA_character_
+      }
+      
+      rt_label <- if(
+        !is.na(rt_type) &&
+        grepl("mortal", rt_type)
+      ){
+        "RTmort"
+      } else if(
+        !is.na(rt_type) &&
+        grepl("forag", rt_type)
+      ){
+        "RTforag"
+      } else {
+        "RT"
+      }
+      
+      title_lab <- if(!is.null(overall_title)){
+        sp_clean
+      } else {
+        paste0(rt_label, "(", sp_clean, ")")
+      }
+      
       x_lab <- "cells/L"
+      
     } else {
-      title_lab <- grp; x_lab <- "value"
+      
+      sp_clean <- if(!is.na(sp_label))
+        .abbrev_label(.nospace(sp_label))
+      else
+        grp
+      
+      title_lab <- grp
+      x_lab <- "value"
     }
+    
+    # Keep x-axis space consistent across panels.
+    # Invisible x-axis text/ticks still reserve the same space.
     axis_title_theme <- ggplot2::theme(
-      axis.title.x = if(show_x_axis) ggplot2::element_text() else ggplot2::element_blank(),
-      axis.title.y = if(show_y_axis) ggplot2::element_text() else ggplot2::element_blank(),
-      # tight margins are what actually controls inter-panel spacing in a patchwork
-      # grid -- patchwork just stacks each panel's own grob, so the visible gap
-      # between panels is the SUM of the two adjacent panels' own margins
+      axis.title.x = ggplot2::element_text(
+        colour = if(show_x_axis)
+          "black"
+        else
+          "transparent"
+      ),
+      
+      axis.title.y = ggplot2::element_blank(),
+      
+      axis.text.x = ggplot2::element_text(
+        colour = if(show_x_axis)
+          "black"
+        else
+          "transparent",
+        size = base_size * 0.60
+      ),
+      
+      axis.ticks.x = ggplot2::element_line(
+        colour = if(show_x_axis)
+          "black"
+        else
+          "transparent"
+      ),
+      
+      axis.text.y = if(show_y_axis){
+        ggplot2::element_text(
+          size = base_size * 0.60
+        )
+      } else {
+        ggplot2::element_blank()
+      },
+      
       plot.margin = ggplot2::margin(1, 1, 1, 1)
     )
-    # title_inside=FALSE (the default) draws a conventional ggplot title row, but
-    # CENTERED (hjust=0.5, not ggplot2's own left-aligned default) and with a tight
-    # bottom margin so it sits close to the panel rather than floating with extra
-    # whitespace above it. title_inside=TRUE instead draws the title as an in-panel
-    # text annotation, positioned at an EXPLICIT (x, y) 3/4 of the way across each
-    # panel's own data range, computed separately per panel below (NOT x=-Inf/y=Inf):
-    # -Inf silently fails to place text at all on a log10-scaled axis (as used for
-    # vul panels), which was dropping titles from every vul histogram entirely --
-    # explicit, finite coordinates work identically on log and linear scales.
+    
     title_theme <- ggplot2::theme(
-      plot.title = if(title_inside) ggplot2::element_blank()
-      else ggplot2::element_text(size = base_size, face = "bold", hjust = 0.5,
-                                 margin = ggplot2::margin(b = 3))
+      plot.title = if(title_inside)
+        ggplot2::element_blank()
+      else
+        ggplot2::element_text(
+          size = base_size,
+          face = "bold",
+          hjust = 0.5,
+          margin = ggplot2::margin(b = 3)
+        )
     )
-    labs_title <- if(title_inside) NULL else title_lab
-
-    if(p1$type %in% c("vul", "disp")){
+    
+    labs_title <- if(title_inside)
+      NULL
+    else
+      title_lab
+    
+    if(p1$type %in% c("vul", "disp", "fleetdyn")){
+      
       col <- cols_g[1]
       b <- get_bounds(col)
       onlog <- p1$type == "vul"
       vals <- gapop_final[[col]]
-      df_hist <- data.frame(value = vals)
-
-      # title position: 3/4 of the way across this panel's own x-range (including the
-      # bound/baseline/best vlines, which can extend the axis well past the histogram
-      # bars themselves) and 3/4 of the way up its y-range. Computed as explicit,
-      # finite coordinates rather than x=-Inf -- -Inf silently fails to place text at
-      # all once scale_x_log10() is applied (as it is here for vul), which is why
-      # titles were missing from every vul panel; a real coordinate works identically
-      # on log and linear scales.
-      all_x <- c(vals, b[1], b[2], baseline[col], best[col])
+      
+      df_hist <- data.frame(
+        value = vals
+      )
+      
+      all_x <- c(
+        vals,
+        b[1],
+        b[2],
+        baseline[col],
+        best[col]
+      )
+      
       if(onlog){
-        log_rng <- log10(range(all_x[all_x > 0], na.rm = TRUE))
-        title_x <- 10^(log_rng[1] + 0.75 * diff(log_rng))
+        
+        log_rng <- log10(
+          range(
+            all_x[all_x > 0],
+            na.rm = TRUE
+          )
+        )
+        
+        title_x <- 10^(
+          log_rng[1] +
+            0.75 * diff(log_rng)
+        )
+        
       } else {
-        rng_x <- range(all_x, na.rm = TRUE)
-        title_x <- rng_x[1] + 0.75 * diff(rng_x)
+        
+        rng_x <- range(
+          all_x,
+          na.rm = TRUE
+        )
+        
+        title_x <- rng_x[1] +
+          0.75 * diff(rng_x)
       }
-      hist_counts <- graphics::hist(if(onlog) log10(vals[vals > 0]) else vals,
-                                    breaks = if(onlog) 50 else 40, plot = FALSE)$counts
-      title_y <- 0.75 * max(hist_counts, na.rm = TRUE)
+      
+      hist_counts <- graphics::hist(
+        if(onlog)
+          log10(vals[vals > 0])
+        else
+          vals,
+        breaks = if(onlog)
+          50
+        else
+          40,
+        plot = FALSE
+      )$counts
+      
+      title_y <- 0.75 *
+        max(
+          hist_counts,
+          na.rm = TRUE
+        )
+      
       title_layer <- if(title_inside)
-        ggplot2::annotate("text", x = title_x, y = title_y, label = title_lab,
-                          hjust = 0.5, vjust = 0.5, fontface = "bold", size = base_size * 0.3)
-      else NULL
-
-      pp <- ggplot2::ggplot(df_hist, ggplot2::aes(x = value)) +
-        { if(onlog) ggplot2::geom_histogram(bins = 50) else ggplot2::geom_histogram(bins = 40) } +
-        ggplot2::geom_vline(xintercept = b[1], color = "red", linetype = "22", linewidth = 0.8) +
-        ggplot2::geom_vline(xintercept = b[2], color = "red", linetype = "22", linewidth = 0.8) +
-        ggplot2::geom_vline(xintercept = baseline[col], color = "black", linetype = "22", linewidth = 1) +
-        ggplot2::geom_vline(xintercept = best[col], color = "#0072B2", linewidth = 1) +
-        { if(onlog) ggplot2::scale_x_log10() } +
+        ggplot2::annotate(
+          "text",
+          x = title_x,
+          y = title_y,
+          label = title_lab,
+          hjust = 0.5,
+          vjust = 0.5,
+          fontface = "bold",
+          size = base_size * 0.3
+        )
+      else
+        NULL
+      
+      pp <- ggplot2::ggplot(
+        df_hist,
+        ggplot2::aes(x = value)
+      ) +
+        {
+          if(onlog)
+            ggplot2::geom_histogram(bins = 50)
+          else
+            ggplot2::geom_histogram(bins = 40)
+        } +
+        ggplot2::geom_vline(
+          xintercept = b[1],
+          color = "red",
+          linetype = "22",
+          linewidth = 0.8
+        ) +
+        ggplot2::geom_vline(
+          xintercept = b[2],
+          color = "red",
+          linetype = "22",
+          linewidth = 0.8
+        ) +
+        ggplot2::geom_vline(
+          xintercept = baseline[col],
+          color = "black",
+          linetype = "22",
+          linewidth = 1
+        ) +
+        ggplot2::geom_vline(
+          xintercept = best[col],
+          color = "#0072B2",
+          linewidth = 1
+        ) +
+        {
+          if(onlog)
+            ggplot2::scale_x_log10()
+        } +
         title_layer +
-        ggplot2::labs(title = labs_title, x = x_lab, y = "count") +
-        ggplot2::theme_bw(base_size = base_size) +
+        ggplot2::labs(
+          title = labs_title,
+          x = x_lab,
+          y = NULL
+        ) +
+        ggplot2::theme_bw(
+          base_size = base_size
+        ) +
         title_theme +
         axis_title_theme
+      
       panel_list[[grp]] <- pp
       next
     }
-
-    # env / redtide: response curve, reusing this script's own eval_*_response()
-    if(is.null(catalog)) next
-    row.i <- which(catalog$group_index == p1$fxn_num)
-    if(length(row.i) == 0) next
+    
+    # env / redtide: response curve
+    if(is.null(catalog))
+      next
+    
+    row.i <- which(
+      catalog$group_index == p1$fxn_num
+    )
+    
+    if(length(row.i) == 0)
+      next
+    
     row.i <- row.i[1]
+    
     shp <- catalog$shape_type[row.i]
-    pr <- c(catalog$par1[row.i], catalog$par2[row.i], catalog$par3[row.i],
-           catalog$par4[row.i], catalog$par5[row.i], catalog$par6[row.i])
-    adj1_col <- cols_g[grepl("xmid|mean|inflection", cols_g)][1]
-    adj2_col <- cols_g[grepl("slope|width", cols_g)][1]
-    if(is.na(adj1_col)) adj1_col <- cols_g[1]
-    if(is.na(adj2_col)) adj2_col <- if(length(cols_g) >= 2) cols_g[2] else adj1_col
+    
+    pr <- c(
+      catalog$par1[row.i],
+      catalog$par2[row.i],
+      catalog$par3[row.i],
+      catalog$par4[row.i],
+      catalog$par5[row.i],
+      catalog$par6[row.i]
+    )
+    
+    adj1_col <- cols_g[
+      grepl(
+        "xmid|mean|inflection",
+        cols_g
+      )
+    ][1]
+    
+    adj2_col <- cols_g[
+      grepl(
+        "slope|width",
+        cols_g
+      )
+    ][1]
+    
+    if(is.na(adj1_col))
+      adj1_col <- cols_g[1]
+    
+    if(is.na(adj2_col))
+      adj2_col <- if(length(cols_g) >= 2)
+        cols_g[2]
+    else
+      adj1_col
+    
     adj1_all <- gapop_final[[adj1_col]]
     adj2_all <- gapop_final[[adj2_col]]
+    
     bounds1 <- get_bounds(adj1_col)
     bounds2 <- get_bounds(adj2_col)
-
-    if(shp == 10){        # sigmoid: par1 XMin, par2 XMax, par3 XMid, par4 XOpt, par5 Slope, par6 Scalar
-      x <- seq(pr[1], pr[2], length.out = 150)
-      f <- function(xmid_adj, slope_adj) pr[6] / (1 + exp(-(pr[5] * slope_adj) * (x - pr[3] * xmid_adj)))
-      curves <- lapply(seq_along(adj1_all), function(k) data.frame(x = x, y = f(adj1_all[k], adj2_all[k]), k = k))
-      curves <- do.call(rbind, curves)
-      base_curve <- data.frame(x = x, y = f(1, 1))
-      best_curve <- data.frame(x = x, y = f(best[adj1_col], best[adj2_col]))
-      bound_lo_curve <- data.frame(x = x, y = f(bounds1[1], bounds2[1]))
-      bound_hi_curve <- data.frame(x = x, y = f(bounds1[2], bounds2[2]))
-    } else if(shp == 9){   # trapezoid: par1 LB, par2 LT, par3 RT, par4 RB
-      mid.base <- (pr[3] + pr[2]) / 2; pref.base <- pr[3] - pr[2]
-      trap <- function(mid_adj, w_adj){
-        mid.i <- mid.base * mid_adj; pref.i <- pref.base * w_adj
-        LT.i <- max(0, mid.i - pref.i / 2); RT.i <- mid.i + pref.i / 2
-        LB.i <- LT.i - (pr[2] - pr[1]) * w_adj; RB.i <- RT.i + (pr[4] - pr[3]) * w_adj
-        data.frame(x = c(LB.i, LT.i, RT.i, RB.i), y = c(0, 1, 1, 0))
+    
+    if(shp == 10){
+      
+      # sigmoid:
+      # par1 XMin, par2 XMax, par3 XMid,
+      # par4 XOpt, par5 Slope, par6 Scalar
+      
+      x <- seq(
+        pr[1],
+        pr[2],
+        length.out = 150
+      )
+      
+      f <- function(
+    xmid_adj,
+    slope_adj
+      ){
+        pr[6] /
+          (
+            1 +
+              exp(
+                -(
+                  pr[5] * slope_adj
+                ) *
+                  (
+                    x -
+                      pr[3] * xmid_adj
+                  )
+              )
+          )
       }
-      curves <- do.call(rbind, lapply(seq_along(adj1_all), function(k){
-        d <- trap(adj1_all[k], adj2_all[k]); d$k <- k; d
-      }))
-      base_curve <- trap(1, 1)
-      best_curve <- trap(best[adj1_col], best[adj2_col])
-      bound_lo_curve <- trap(bounds1[1], bounds2[1])
-      bound_hi_curve <- trap(bounds1[2], bounds2[2])
-    } else if(shp == 6){   # normal: par1 SDLeft, par3 SDRight, par4 Mean, par5 Max
-      dw.base <- 5 * pr[1] + 5 * pr[3]
-      x <- seq(pr[4] - dw.base, pr[4] + dw.base, length.out = 150)
-      f <- function(mean_adj, width_adj) eval_normal_response(x, pr[4] * mean_adj, pr[1] * width_adj, pr[3] * width_adj, pr[5])
-      curves <- do.call(rbind, lapply(seq_along(adj1_all), function(k)
-        data.frame(x = x, y = f(adj1_all[k], adj2_all[k]), k = k)))
-      base_curve <- data.frame(x = x, y = f(1, 1))
-      best_curve <- data.frame(x = x, y = f(best[adj1_col], best[adj2_col]))
-      bound_lo_curve <- data.frame(x = x, y = f(bounds1[1], bounds2[1]))
-      bound_hi_curve <- data.frame(x = x, y = f(bounds1[2], bounds2[2]))
-    } else if(shp == 11){  # logistic4params: par1 XMin, par2 XMax, par3 Inflection, par4 Slope
-      x <- seq(pr[1], pr[2], length.out = 150)
-      f <- function(inf_adj, slope_adj) eval_logistic4params_response(x, pr[1], pr[2], pr[3] * inf_adj, pr[4] * slope_adj)
-      curves <- do.call(rbind, lapply(seq_along(adj1_all), function(k)
-        data.frame(x = x, y = f(adj1_all[k], adj2_all[k]), k = k)))
-      base_curve <- data.frame(x = x, y = f(1, 1))
-      best_curve <- data.frame(x = x, y = f(best[adj1_col], best[adj2_col]))
-      bound_lo_curve <- data.frame(x = x, y = f(bounds1[1], bounds2[1]))
-      bound_hi_curve <- data.frame(x = x, y = f(bounds1[2], bounds2[2]))
-    } else next
-
-    # title position: 3/4 of the way across x and up y, using this panel's own curve
-    # data -- same explicit-coordinate approach as the histogram panels above, for
-    # the same reason (a real coordinate is unaffected by any scale transform).
-    title_x <- min(x) + 0.75 * diff(range(x))
-    y_all <- c(curves$y, bound_lo_curve$y, bound_hi_curve$y, base_curve$y, best_curve$y)
-    title_y <- min(y_all, na.rm = TRUE) + 0.75 * diff(range(y_all, na.rm = TRUE))
+      
+      curves <- lapply(
+        seq_along(adj1_all),
+        function(k)
+          data.frame(
+            x = x,
+            y = f(
+              adj1_all[k],
+              adj2_all[k]
+            ),
+            k = k
+          )
+      )
+      
+      curves <- do.call(
+        rbind,
+        curves
+      )
+      
+      base_curve <- data.frame(
+        x = x,
+        y = f(1, 1)
+      )
+      
+      best_curve <- data.frame(
+        x = x,
+        y = f(
+          best[adj1_col],
+          best[adj2_col]
+        )
+      )
+      
+      bound_lo_curve <- data.frame(
+        x = x,
+        y = f(
+          bounds1[1],
+          bounds2[1]
+        )
+      )
+      
+      bound_hi_curve <- data.frame(
+        x = x,
+        y = f(
+          bounds1[2],
+          bounds2[2]
+        )
+      )
+      
+    } else if(shp == 9){
+      
+      # trapezoid:
+      # par1 LB, par2 LT, par3 RT, par4 RB
+      
+      mid.base <- (
+        pr[3] + pr[2]
+      ) / 2
+      
+      pref.base <- pr[3] -
+        pr[2]
+      
+      trap <- function(
+    mid_adj,
+    w_adj
+      ){
+        mid.i <- mid.base *
+          mid_adj
+        
+        pref.i <- pref.base *
+          w_adj
+        
+        LT.i <- max(
+          0,
+          mid.i - pref.i / 2
+        )
+        
+        RT.i <- mid.i +
+          pref.i / 2
+        
+        LB.i <- LT.i -
+          (pr[2] - pr[1]) *
+          w_adj
+        
+        RB.i <- RT.i +
+          (pr[4] - pr[3]) *
+          w_adj
+        
+        data.frame(
+          x = c(
+            LB.i,
+            LT.i,
+            RT.i,
+            RB.i
+          ),
+          y = c(
+            0,
+            1,
+            1,
+            0
+          )
+        )
+      }
+      
+      curves <- do.call(
+        rbind,
+        lapply(
+          seq_along(adj1_all),
+          function(k){
+            d <- trap(
+              adj1_all[k],
+              adj2_all[k]
+            )
+            d$k <- k
+            d
+          }
+        )
+      )
+      
+      base_curve <- trap(
+        1,
+        1
+      )
+      
+      best_curve <- trap(
+        best[adj1_col],
+        best[adj2_col]
+      )
+      
+      bound_lo_curve <- trap(
+        bounds1[1],
+        bounds2[1]
+      )
+      
+      bound_hi_curve <- trap(
+        bounds1[2],
+        bounds2[2]
+      )
+      
+    } else if(shp == 6){
+      
+      # normal:
+      # par1 SDLeft, par3 SDRight,
+      # par4 Mean, par5 Max
+      
+      dw.base <- 5 * pr[1] +
+        5 * pr[3]
+      
+      x <- seq(
+        pr[4] - dw.base,
+        pr[4] + dw.base,
+        length.out = 150
+      )
+      
+      f <- function(
+    mean_adj,
+    width_adj
+      )
+        eval_normal_response(
+          x,
+          pr[4] * mean_adj,
+          pr[1] * width_adj,
+          pr[3] * width_adj,
+          pr[5]
+        )
+      
+      curves <- do.call(
+        rbind,
+        lapply(
+          seq_along(adj1_all),
+          function(k)
+            data.frame(
+              x = x,
+              y = f(
+                adj1_all[k],
+                adj2_all[k]
+              ),
+              k = k
+            )
+        )
+      )
+      
+      base_curve <- data.frame(
+        x = x,
+        y = f(1, 1)
+      )
+      
+      best_curve <- data.frame(
+        x = x,
+        y = f(
+          best[adj1_col],
+          best[adj2_col]
+        )
+      )
+      
+      bound_lo_curve <- data.frame(
+        x = x,
+        y = f(
+          bounds1[1],
+          bounds2[1]
+        )
+      )
+      
+      bound_hi_curve <- data.frame(
+        x = x,
+        y = f(
+          bounds1[2],
+          bounds2[2]
+        )
+      )
+      
+    } else if(shp == 11){
+      
+      # logistic4params:
+      # par1 XMin, par2 XMax,
+      # par3 Inflection, par4 Slope
+      
+      x <- seq(
+        pr[1],
+        pr[2],
+        length.out = 150
+      )
+      
+      f <- function(
+    inf_adj,
+    slope_adj
+      )
+        eval_logistic4params_response(
+          x,
+          pr[1],
+          pr[2],
+          pr[3] * inf_adj,
+          pr[4] * slope_adj
+        )
+      
+      curves <- do.call(
+        rbind,
+        lapply(
+          seq_along(adj1_all),
+          function(k)
+            data.frame(
+              x = x,
+              y = f(
+                adj1_all[k],
+                adj2_all[k]
+              ),
+              k = k
+            )
+        )
+      )
+      
+      base_curve <- data.frame(
+        x = x,
+        y = f(1, 1)
+      )
+      
+      best_curve <- data.frame(
+        x = x,
+        y = f(
+          best[adj1_col],
+          best[adj2_col]
+        )
+      )
+      
+      bound_lo_curve <- data.frame(
+        x = x,
+        y = f(
+          bounds1[1],
+          bounds2[1]
+        )
+      )
+      
+      bound_hi_curve <- data.frame(
+        x = x,
+        y = f(
+          bounds1[2],
+          bounds2[2]
+        )
+      )
+      
+    } else {
+      next
+    }
+    
+    # title position
+    title_x <- min(x) +
+      0.75 * diff(range(x))
+    
+    y_all <- c(
+      curves$y,
+      bound_lo_curve$y,
+      bound_hi_curve$y,
+      base_curve$y,
+      best_curve$y
+    )
+    
+    title_y <- min(
+      y_all,
+      na.rm = TRUE
+    ) +
+      0.75 *
+      diff(
+        range(
+          y_all,
+          na.rm = TRUE
+        )
+      )
+    
     title_layer <- if(title_inside)
-      ggplot2::annotate("text", x = title_x, y = title_y, label = title_lab,
-                        hjust = 0.5, vjust = 0.5, fontface = "bold", size = base_size * 0.3)
-    else NULL
-
+      ggplot2::annotate(
+        "text",
+        x = title_x,
+        y = title_y,
+        label = title_lab,
+        hjust = 0.5,
+        vjust = 0.5,
+        fontface = "bold",
+        size = base_size * 0.3
+      )
+    else
+      NULL
+    
     pp <- ggplot2::ggplot() +
-      ggplot2::geom_line(data = curves, ggplot2::aes(x = x, y = y, group = k), color = "grey60", alpha = 0.12, linewidth = 0.3) +
-      ggplot2::geom_line(data = bound_lo_curve, ggplot2::aes(x = x, y = y), color = "red", linetype = "22", linewidth = 0.8) +
-      ggplot2::geom_line(data = bound_hi_curve, ggplot2::aes(x = x, y = y), color = "red", linetype = "22", linewidth = 0.8) +
-      ggplot2::geom_line(data = base_curve, ggplot2::aes(x = x, y = y), color = "black", linetype = "22", linewidth = 1) +
-      ggplot2::geom_line(data = best_curve, ggplot2::aes(x = x, y = y), color = "#0072B2", linewidth = 1) +
+      ggplot2::geom_line(
+        data = curves,
+        ggplot2::aes(
+          x = x,
+          y = y,
+          group = k
+        ),
+        color = "grey60",
+        alpha = 0.12,
+        linewidth = 0.3
+      ) +
+      ggplot2::geom_line(
+        data = bound_lo_curve,
+        ggplot2::aes(
+          x = x,
+          y = y
+        ),
+        color = "red",
+        linetype = "22",
+        linewidth = 0.8
+      ) +
+      ggplot2::geom_line(
+        data = bound_hi_curve,
+        ggplot2::aes(
+          x = x,
+          y = y
+        ),
+        color = "red",
+        linetype = "22",
+        linewidth = 0.8
+      ) +
+      ggplot2::geom_line(
+        data = base_curve,
+        ggplot2::aes(
+          x = x,
+          y = y
+        ),
+        color = "black",
+        linetype = "22",
+        linewidth = 1
+      ) +
+      ggplot2::geom_line(
+        data = best_curve,
+        ggplot2::aes(
+          x = x,
+          y = y
+        ),
+        color = "#0072B2",
+        linewidth = 1
+      ) +
       title_layer +
-      ggplot2::labs(title = labs_title, x = x_lab, y = "response") +
-      # red-tide cells/L values run into the hundreds of thousands/millions --
-      # abbreviate tick labels (e.g. "250K", "1M") rather than showing every zero
-      { if(p1$type == "redtide") ggplot2::scale_x_continuous(labels = scales::label_number(scale_cut = scales::cut_short_scale())) } +
-      ggplot2::theme_bw(base_size = base_size) +
+      ggplot2::labs(
+        title = labs_title,
+        x = x_lab,
+        y = "response"
+      ) +
+      # depth is plotted over the modelled 0-130 m range
+      {
+        if(p1$type == "env" &&
+           identical(driver_nm, "depth"))
+          ggplot2::coord_cartesian(
+            xlim = c(0, 130)
+          )
+      } +
+      # red-tide cells/L values run into the hundreds of thousands/millions
+      {
+        if(p1$type == "redtide")
+          ggplot2::scale_x_continuous(
+            labels = scales::label_number(
+              scale_cut = scales::cut_short_scale()
+            )
+          )
+      } +
+      ggplot2::theme_bw(
+        base_size = base_size
+      ) +
       title_theme +
       axis_title_theme
+    
     panel_list[[grp]] <- pp
   }
-
+  
   if(length(panel_list) == 0)
     stop("plot_ga_final_pop_distributions(): no panels to plot -- check types/species_patterns/catalog.")
-
-  n_rows <- ceiling(length(panel_list) / facet_ncol)
-  w <- if(is.null(width)) max(4, facet_ncol * 3.2) else width
-  h <- if(is.null(height)) max(3.2, n_rows * 3.2) else height
-  p_combined <- patchwork::wrap_plots(panel_list, ncol = facet_ncol)
-  if(!is.null(overall_title))
-    p_combined <- p_combined + patchwork::plot_annotation(
-      title = overall_title,
-      theme = ggplot2::theme(plot.title = ggplot2::element_text(size = base_size * 1.3, face = "bold", hjust = 0.5)))
-
-  if(save_plot){
-    if(is.null(png_file))
-      png_file <- paste0("ga_final_pop_distributions_", paste(species_patterns, collapse = "_"), ".png")
-    if(!dir.exists(plots_dir)) dir.create(plots_dir, recursive = TRUE, showWarnings = FALSE)
-    out_path <- file.path(plots_dir, png_file)
-    ggplot2::ggsave(out_path, plot = p_combined, width = w, height = h, dpi = dpi, units = "in")
-    message("Wrote ", out_path, " (", length(panel_list), " panel(s)).")
+  
+  w <- if(is.null(width))
+    max(4, facet_ncol * 3.2)
+  else
+    width
+  
+  h <- if(is.null(height))
+    max(3.2, n_rows * 3.2)
+  else
+    height
+  
+  # ---- combine panels into a fixed rectangular grid ----
+  #
+  # The final row is padded to a complete row. This prevents the incomplete
+  # 34-panel row from being treated differently by patchwork.
+  #
+  # The extra vertical space is assigned to the LAST row, not the row above it.
+  # This compensates for the x-axis labels shown on panels 29-30 without
+  # increasing the apparent distance between rows 5 and 6.
+  
+  n_cells <- n_rows * facet_ncol
+  
+  panel_grid <- c(
+    panel_list,
+    rep(
+      list(patchwork::plot_spacer()),
+      n_cells - length(panel_list)
+    )
+  )
+  
+  row_heights <- rep(
+    1,
+    n_rows
+  )
+  
+  if(
+    n_rows > 1 &&
+    n_groups %% facet_ncol != 0
+  ){
+    row_heights[n_rows] <- 1.25
   }
-
-  # the combined patchwork plot is attached as an attribute (not the return value
-  # itself) so this stays backward-compatible: summary_df is still a plain
-  # data.frame for existing callers, while a caller that wants to combine several
-  # calls into one multi-panel figure (e.g. A/B/C lettered sections) can retrieve
-  # it via attr(result, "plot") -- see the @return docs for a worked example.
-  attr(summary_df, "plot") <- p_combined
+  
+  p_combined <- patchwork::wrap_plots(
+    panel_grid,
+    ncol = facet_ncol,
+    byrow = TRUE,
+    axes = "collect",
+    heights = row_heights
+  )
+  
+  if(!is.null(overall_title))
+    p_combined <- p_combined +
+    patchwork::plot_annotation(
+      title = overall_title,
+      theme = ggplot2::theme(
+        plot.title = ggplot2::element_text(
+          size = base_size * 1.3,
+          face = "bold",
+          hjust = 0.5
+        )
+      )
+    )
+  
+  if(save_plot){
+    
+    if(is.null(png_file))
+      png_file <- paste0(
+        "ga_final_pop_distributions_",
+        paste(species_patterns, collapse = "_"),
+        ".png"
+      )
+    
+    if(!dir.exists(plots_dir))
+      dir.create(
+        plots_dir,
+        recursive = TRUE,
+        showWarnings = FALSE
+      )
+    
+    out_path <- file.path(
+      plots_dir,
+      png_file
+    )
+    
+    ggplot2::ggsave(
+      out_path,
+      plot = p_combined,
+      width = w,
+      height = h,
+      dpi = dpi,
+      units = "in"
+    )
+    
+    message(
+      "Wrote ",
+      out_path,
+      " (",
+      length(panel_list),
+      " panel(s))."
+    )
+  }
+  
+  # Keep backward compatibility: summary_df remains a data.frame,
+  # while the combined patchwork plot is available as attr(result, "plot").
+  attr(
+    summary_df,
+    "plot"
+  ) <- p_combined
+  
   invisible(summary_df)
 }
-
-
-
 #
 # Each candidate's cmd.txt has lines like:
 #   <ECOSPACE_ENVIRONMENTAL_RESPONSE_INDEXED>(4), 10 9.144 132.59 18.9209 0 -0.1563 0.991, Indexed.Single[]
@@ -7749,7 +8742,7 @@ eval_logistic4params_response <- function(x, xmin, xmax, inflection, slope){
 .eval_catalog_response_curve <- function(catalog_row, n_points = 200, x_floor = NULL){
   shp <- catalog_row$shape_type[1]
   p <- c(catalog_row$par1[1], catalog_row$par2[1], catalog_row$par3[1],
-        catalog_row$par4[1], catalog_row$par5[1], catalog_row$par6[1])
+         catalog_row$par4[1], catalog_row$par5[1], catalog_row$par6[1])
   
   if(!is.na(shp) && shp == 10 && !anyNA(p[1:5])){                  # Sigmoid
     xmin <- p[1]; xmax <- p[2]; xmid <- p[3]; xopt <- p[4]; steep <- p[5]; ymax <- p[6]
@@ -7944,7 +8937,7 @@ plot_ga_response_curves <- function(ga_runs, group_index,
     ggplot2::labs(title = paste0(group_display, " -- ", driver_txt),
                   x = driver_txt, y = "Relative response") +
     ggplot2::theme_bw(base_size = 11) +
-    ggplot2::theme(plot.title = ggplot2::element_text(size = 11, face = "bold"), aspect.ratio = 1)
+    ggplot2::theme(plot.title = ggplot2::element_text(size = 11, face = "bold"))
   
   if(is.null(png_file)) png_file <- paste0("response_curves_", safe_name(group_display), ".png")
   if(!dir.exists(plots_dir)) dir.create(plots_dir, recursive = TRUE, showWarnings = FALSE)
@@ -8287,7 +9280,7 @@ plot_ga_response_by_driver_map <- function(ga_runs, driver_map, driver_name,
     message("plot_ga_response_by_driver_map(): driver '", driver_name, "', species '", sp_label,
             "' -> ", nrow(sel), " response function(s) (", n_fixed_here, " fixed): ",
             paste0(sel$group_name, " (idx ", sel$group_index, ifelse(sel$is_fixed, ", fixed", ""), ")",
-                  collapse = ", "))
+                   collapse = ", "))
     
     driver_labels <- stats::setNames(sel$driver, as.character(sel$group_index))
     
@@ -8689,4 +9682,88 @@ discover_response_group_indices <- function(ga_runs, max_check = 5){
           "environmental response function, from ", n_checked, " candidate(s) checked: ",
           paste(idx_all, collapse = ", "))
   idx_all
+}
+
+#' Which gag / red grouper parameters were tested in the sensitivity analysis, and which were calibrated?
+#'
+#' Reads the sensitivity workbook (every parameter that was perturbed), compares against the GA
+#' parameter vector (parvec) and returns/plots one row per tested parameter with status
+#' "calibrated" or "not calibrated (baseline value kept)". Calibrated parameters show baseline,
+#' best-fit value and search bounds; not-calibrated ones show only the baseline value.
+#' Writes a CSV next to the PNG.
+#' @return data.frame (invisible).
+plot_tested_vs_calibrated <- function(sens_xlsx, parvec, gapop_init, gapop_final, ga_runs, group_names,
+                                      catalog = NULL, species_patterns = c("gag", "red grouper"),
+                                      plots_dir = "plots", png_file = "parameters_calibrated_vs_not.png",
+                                      csv_file = "parameters_calibrated_vs_not.csv"){
+  d <- as.data.frame(readxl::read_excel(sens_xlsx))
+  if(is.character(parvec)) parvec <- utils::read.csv(parvec, row.names = 1, check.names = FALSE)
+  pcols <- setdiff(names(gapop_final), "gapop_row")
+  base <- stats::setNames(as.numeric(gapop_init[gapop_init$gapop_row == 1, pcols, drop = FALSE][1, ]), pcols)
+  bi <- ga_runs$gapop_row[which.min(ga_runs$fitness)]
+  best <- stats::setNames(as.numeric(gapop_final[gapop_final$gapop_row == bi, pcols, drop = FALSE][1, ]), pcols)
+  gname <- function(i) ifelse(is.na(i) | i + 1 > length(group_names), NA_character_, group_names[i + 1])
+  hit <- function(x) !is.na(x) & Reduce(`|`, lapply(species_patterns, function(p) grepl(p, x, ignore.case = TRUE)))
+  rows <- list()
+  
+  v <- d[which(d$tag.type == "predprey"), c("pred", "prey", "base.val")]
+  v <- v[!duplicated(v[, c("pred", "prey")]), ]
+  if(nrow(v) > 0){
+    v$pn <- gname(v$pred); v$yn <- gname(v$prey)
+    v <- v[hit(v$pn) | hit(v$yn), ]
+    id <- paste0("vul_", v$pred, "_", v$prey)
+    rows$vul <- data.frame(type = "Vulnerability", id = id, label = paste0(v$pn, " / ", v$yn),
+                           baseline = v$base.val, stringsAsFactors = FALSE)
+  }
+  dd <- d[which(d$tag.type == "dispersal"), c("pred", "base.val")]
+  dd <- dd[!duplicated(dd$pred), ]
+  if(nrow(dd) > 0){
+    dd$n <- gname(dd$pred); dd <- dd[hit(dd$n), ]
+    if(nrow(dd) > 0)
+      rows$disp <- data.frame(type = "Dispersal rate", id = paste0("disp_", dd$pred), label = dd$n,
+                              baseline = dd$base.val, stringsAsFactors = FALSE)
+  }
+  out <- do.call(rbind, rows)
+  out$calibrated <- out$id %in% rownames(parvec)
+  out$best_fit <- ifelse(out$calibrated, unname(best[out$id]), NA_real_)
+  out$lower <- ifelse(out$calibrated, parvec[out$id, "L.bounds"], NA_real_)
+  out$upper <- ifelse(out$calibrated, parvec[out$id, "U.bounds"], NA_real_)
+  out$status <- ifelse(out$calibrated, "calibrated", "not calibrated (baseline kept)")
+  
+  # environmental / red-tide response curves: one row per response function of these species
+  if(!is.null(catalog) && nrow(catalog) > 0){
+    cat_hit <- catalog[hit(catalog$group_name), , drop = FALSE]
+    if(nrow(cat_hit) > 0){
+      pid <- sub("^(env|rt)([0-9]+)_.*", "\\2", grep("^(env|rt)[0-9]+_", rownames(parvec), value = TRUE))
+      ptype <- sub("^(env|rt)([0-9]+)_.*", "\\1", grep("^(env|rt)[0-9]+_", rownames(parvec), value = TRUE))
+      ec <- data.frame(type = "Response curve", id = paste0("curve_", cat_hit$group_index),
+                       label = cat_hit$group_name, baseline = NA_real_, calibrated = cat_hit$group_index %in% as.integer(pid),
+                       best_fit = NA_real_, lower = NA_real_, upper = NA_real_, stringsAsFactors = FALSE)
+      ec$status <- ifelse(ec$calibrated, "calibrated", "not calibrated (baseline kept)")
+      out <- rbind(out, ec)
+    }
+  }
+  rownames(out) <- NULL
+  if(!dir.exists(plots_dir)) dir.create(plots_dir, recursive = TRUE)
+  utils::write.csv(out, file.path(plots_dir, csv_file), row.names = FALSE)
+  message("plot_tested_vs_calibrated(): ", sum(out$calibrated), " calibrated, ", sum(!out$calibrated),
+          " not calibrated, of ", nrow(out), " tested gag / red grouper parameters.")
+  
+  pd <- out[out$type %in% c("Vulnerability", "Dispersal rate"), ]
+  pd <- pd[order(pd$type, !pd$calibrated, pd$label), ]
+  pd$ylab <- factor(paste0(pd$label, "  [", pd$id, "]"), levels = rev(unique(paste0(pd$label, "  [", pd$id, "]"))))
+  p <- ggplot2::ggplot(pd, ggplot2::aes(y = ylab)) +
+    ggplot2::geom_segment(data = pd[pd$calibrated, ], ggplot2::aes(x = lower, xend = upper, yend = ylab),
+                          colour = "grey75", linewidth = 1.2) +
+    ggplot2::geom_point(ggplot2::aes(x = baseline, colour = status, shape = "Baseline"), size = 2.2) +
+    ggplot2::geom_point(data = pd[pd$calibrated, ], ggplot2::aes(x = best_fit, colour = status, shape = "Best model"), size = 2.6) +
+    ggplot2::scale_colour_manual(values = c("calibrated" = "#B5367A", "not calibrated (baseline kept)" = "grey45"), name = NULL) +
+    ggplot2::scale_shape_manual(values = c("Baseline" = 1, "Best model" = 16), name = NULL) +
+    ggplot2::scale_x_log10() +
+    ggplot2::facet_grid(type ~ ., scales = "free", space = "free_y") +
+    ggplot2::labs(x = "Parameter value (log scale); grey bar = GA search bounds", y = NULL) +
+    ggplot2::theme_bw(base_size = 9) + ggplot2::theme(legend.position = "bottom")
+  ggplot2::ggsave(file.path(plots_dir, png_file), p, width = 9, height = max(4, 0.17 * nrow(pd) + 1.5),
+                  dpi = 200, units = "in", limitsize = FALSE)
+  invisible(out)
 }
