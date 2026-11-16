@@ -1975,7 +1975,8 @@ plot_ga_ensemble_faceted <- function(obs = NULL,
         if(ylim_from_obs && length(obs_and_init_vals) > 0){
           rng <- range(obs_and_init_vals, na.rm = TRUE)
         } else {
-          rng <- range(sub_pred$value, na.rm = TRUE)
+          # full axis: candidates + observations + baseline + ensemble mean, so nothing is clipped
+          rng <- range(c(sub_pred$value, obs_and_init_vals), na.rm = TRUE)
         }
         pad <- diff(rng) * ylim_pad
         if(!is.finite(pad) || pad <= 0) pad <- max(abs(rng), 1) * ylim_pad
@@ -2023,7 +2024,8 @@ plot_ga_ensemble_faceted <- function(obs = NULL,
         pp <- pp +
           (if(show_candidates) .nll_scale(fitness_limits, palette) else NULL) +
           ggplot2::scale_x_continuous(expand = c(0, 0)) +
-          ggplot2::scale_y_continuous(expand = c(0, 0)) +
+          ggplot2::scale_y_continuous(expand = c(0, 0),
+                                      labels = function(x) format(x, scientific = FALSE, trim = TRUE)) +   # 0.001, not 1e-03
           # coord_cartesian(), not scale_y_continuous(limits=) -- the latter DROPS any
           # point outside the range entirely, which is why several ensemble candidate
           # lines were missing from the plot (their values extended beyond the
@@ -7320,6 +7322,11 @@ plot_ga_final_pop_distributions <- function(gapop_final, gapop_init, ga_runs,
                                             max_title_chars = 11,
                                             abbreviate_minlength = NULL,
                                             title_two_line = FALSE,
+                                            title_style = c("ids", "names"),   # "names": V(gag0-smallree), as in the manuscript
+                                            title_scale = 1,    # panel-title size relative to base_size (use ~0.85 when printing small)
+                                            line_scale = 1,     # multiplies all line widths (use ~0.5 when printing small)
+                                            panel_aspect = NULL,   # 1 = square panels
+                                            x_axis_all = FALSE,    # TRUE = x-axis numbers and title on every panel
                                             plots_dir = "plots", png_file = NULL, save_plot = TRUE,
                                             width = NULL, height = NULL, dpi = 200){
   if(!requireNamespace("ggplot2", quietly = TRUE))
@@ -7327,6 +7334,7 @@ plot_ga_final_pop_distributions <- function(gapop_final, gapop_init, ga_runs,
   if(!requireNamespace("patchwork", quietly = TRUE))
     stop("Package 'patchwork' is required. Install it with install.packages('patchwork').")
   
+  title_style <- match.arg(title_style)
   param_cols <- setdiff(names(gapop_final), "gapop_row")
   # `parvec`: path to (or data.frame of) parvec_<label>.csv. When supplied, every parameter
   # uses ITS OWN search bounds (L.bounds / U.bounds) instead of the type-wide defaults below.
@@ -7623,7 +7631,12 @@ plot_ga_final_pop_distributions <- function(gapop_final, gapop_init, ga_runs,
       function(z) {
         if(nchar(z) <= max_title_chars)
           return(z)
-        
+
+        # keep a trailing stanza number ("redgrouper1" -> "redgro1") so stanzas stay distinguishable
+        m <- regmatches(z, regexec("^(.*?)([0-9]+\\+?)$", z))[[1]]
+        if(length(m) == 3 && nzchar(m[2]))
+          return(paste0(substr(m[2], 1, max(3, max_title_chars - nchar(m[3]))), m[3]))
+
         substr(z, 1, max_title_chars)
       },
       character(1)
@@ -7651,7 +7664,7 @@ plot_ga_final_pop_distributions <- function(gapop_final, gapop_init, ga_runs,
       by = facet_ncol
     )
     
-    show_x_axis <- (idx == max(panels_in_this_col))
+    show_x_axis <- x_axis_all || (idx == max(panels_in_this_col))
     
     cols_g <- param_cols[
       vapply(
@@ -7673,6 +7686,8 @@ plot_ga_final_pop_distributions <- function(gapop_final, gapop_init, ga_runs,
       
       title_lab <- if(!is.null(overall_title)){
         sp_clean
+      } else if(title_style == "names"){
+        paste0("V(", sp_clean, ")")
       } else if(title_two_line){
         gsub("/", "\n", sp_clean, fixed = TRUE)
       } else {
@@ -7789,6 +7804,7 @@ plot_ga_final_pop_distributions <- function(gapop_final, gapop_init, ga_runs,
     # Invisible x-axis text/ticks still reserve the same space.
     axis_title_theme <- ggplot2::theme(
       axis.title.x = ggplot2::element_text(
+        size = base_size * 0.75,
         colour = if(show_x_axis)
           "black"
         else
@@ -7828,7 +7844,7 @@ plot_ga_final_pop_distributions <- function(gapop_final, gapop_init, ga_runs,
         ggplot2::element_blank()
       else
         ggplot2::element_text(
-          size = base_size,
+          size = base_size * title_scale,
           face = "bold",
           hjust = 0.5,
           margin = ggplot2::margin(b = 3)
@@ -7930,24 +7946,24 @@ plot_ga_final_pop_distributions <- function(gapop_final, gapop_init, ga_runs,
           xintercept = b[1],
           color = "red",
           linetype = "22",
-          linewidth = 0.8
+          linewidth = 0.8 * line_scale
         ) +
         ggplot2::geom_vline(
           xintercept = b[2],
           color = "red",
           linetype = "22",
-          linewidth = 0.8
+          linewidth = 0.8 * line_scale
         ) +
         ggplot2::geom_vline(
           xintercept = baseline[col],
           color = "black",
           linetype = "22",
-          linewidth = 1
+          linewidth = 1 * line_scale
         ) +
         ggplot2::geom_vline(
           xintercept = best[col],
           color = "#0072B2",
-          linewidth = 1
+          linewidth = 1 * line_scale
         ) +
         {
           if(onlog)
@@ -7963,7 +7979,8 @@ plot_ga_final_pop_distributions <- function(gapop_final, gapop_init, ga_runs,
           base_size = base_size
         ) +
         title_theme +
-        axis_title_theme
+        axis_title_theme +
+        (if(!is.null(panel_aspect)) ggplot2::theme(aspect.ratio = panel_aspect) else NULL)
       
       panel_list[[grp]] <- pp
       next
@@ -8382,7 +8399,7 @@ plot_ga_final_pop_distributions <- function(gapop_final, gapop_init, ga_runs,
         ),
         color = "grey60",
         alpha = 0.12,
-        linewidth = 0.3
+        linewidth = 0.3 * line_scale
       ) +
       ggplot2::geom_line(
         data = bound_lo_curve,
@@ -8392,7 +8409,7 @@ plot_ga_final_pop_distributions <- function(gapop_final, gapop_init, ga_runs,
         ),
         color = "red",
         linetype = "22",
-        linewidth = 0.8
+        linewidth = 0.8 * line_scale
       ) +
       ggplot2::geom_line(
         data = bound_hi_curve,
@@ -8402,7 +8419,7 @@ plot_ga_final_pop_distributions <- function(gapop_final, gapop_init, ga_runs,
         ),
         color = "red",
         linetype = "22",
-        linewidth = 0.8
+        linewidth = 0.8 * line_scale
       ) +
       ggplot2::geom_line(
         data = base_curve,
@@ -8412,7 +8429,7 @@ plot_ga_final_pop_distributions <- function(gapop_final, gapop_init, ga_runs,
         ),
         color = "black",
         linetype = "22",
-        linewidth = 1
+        linewidth = 1 * line_scale
       ) +
       ggplot2::geom_line(
         data = best_curve,
@@ -8421,7 +8438,7 @@ plot_ga_final_pop_distributions <- function(gapop_final, gapop_init, ga_runs,
           y = y
         ),
         color = "#0072B2",
-        linewidth = 1
+        linewidth = 1 * line_scale
       ) +
       title_layer +
       ggplot2::labs(
@@ -8450,7 +8467,8 @@ plot_ga_final_pop_distributions <- function(gapop_final, gapop_init, ga_runs,
         base_size = base_size
       ) +
       title_theme +
-      axis_title_theme
+      axis_title_theme +
+      (if(!is.null(panel_aspect)) ggplot2::theme(aspect.ratio = panel_aspect) else NULL)
     
     panel_list[[grp]] <- pp
   }
@@ -8494,7 +8512,8 @@ plot_ga_final_pop_distributions <- function(gapop_final, gapop_init, ga_runs,
   
   if(
     n_rows > 1 &&
-    n_groups %% facet_ncol != 0
+    n_groups %% facet_ncol != 0 &&
+    is.null(panel_aspect)     # with fixed (square) panels every row must be the same height
   ){
     row_heights[n_rows] <- 1.25
   }
@@ -8561,6 +8580,7 @@ plot_ga_final_pop_distributions <- function(gapop_final, gapop_init, ga_runs,
   
   # Keep backward compatibility: summary_df remains a data.frame,
   # while the combined patchwork plot is available as attr(result, "plot").
+  attr(summary_df, "panels") <- panel_list   # individual ggplots, to build one common grid across calls
   attr(
     summary_df,
     "plot"

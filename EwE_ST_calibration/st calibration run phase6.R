@@ -112,25 +112,28 @@ n_pan <- function(x, default) if(is.data.frame(x) && nrow(x) > 0) nrow(x) else d
 vul_summary2 <- plot_ga_final_pop_distributions(
   gapop_final = gapop_final, gapop_init = gapop_init, ga_runs = ga_runs,
   catalog = catalog, group_names = group_names, species_patterns = "gag", parvec = PARVEC,
-  types = "vul", facet_ncol = 6, base_size = 20, max_title_chars = 8,
+  types = "vul", facet_ncol = 6, base_size = 9, max_title_chars = 7, title_style = "names", title_scale = 0.75, line_scale = 0.5, panel_aspect = 1, x_axis_all = TRUE,
   save_plot = FALSE, plots_dir = file.path(PLOTS, "ts"),
   width = 6 * 3.2, height = ceiling(34 / 6) * 3.2)
 n_vul <- n_pan(vul_summary2, 34)
 envrt_summary2 <- plot_ga_final_pop_distributions(
   gapop_final = gapop_final, gapop_init = gapop_init, ga_runs = ga_runs,
   catalog = catalog, group_names = group_names, species_patterns = "gag", parvec = PARVEC,
-  types = c("env", "redtide", "disp"), facet_ncol = 6, base_size = 20, max_title_chars = 8,
+  types = c("env", "redtide", "disp"), facet_ncol = 6, base_size = 9, max_title_chars = 7, title_scale = 0.75, line_scale = 0.5, panel_aspect = 1, x_axis_all = TRUE,
   save_plot = FALSE, plots_dir = file.path(PLOTS, "ts"),
   width = 6 * 3.2, height = ceiling(20 / 6) * 3.2)
 n_env <- n_pan(envrt_summary2, 20)
 message("gag panels: ", n_vul, " vulnerability, ", n_env, " env/red tide/dispersal")
 
+# ONE grid for all panels (vulnerabilities, then responses), so every panel has the same size.
+# The vulnerability block is padded to full rows before the response panels start.
+pad_to_row <- function(pl, ncol = 6) c(pl, rep(list(patchwork::plot_spacer()), (-length(pl)) %% ncol))
 combined_opt2 <- patchwork::wrap_plots(
-  list(attr(vul_summary2, "plot"), attr(envrt_summary2, "plot")),
-  ncol = 1, heights = c(ceiling(n_vul / 6), ceiling(n_env / 6)), axes = "collect")
+  c(pad_to_row(attr(vul_summary2, "panels")), pad_to_row(attr(envrt_summary2, "panels"))),
+  ncol = 6, byrow = TRUE)
 ggplot2::ggsave(file.path(PLOTS, "ts/ga_final_pop_distributions_gag_opt2_stacked.png"),
-                plot = combined_opt2, width = 5 * 3.2,
-                height = (ceiling(n_vul / 6) + ceiling(n_env / 6)) * 3, dpi = 200, units = "in")
+                plot = combined_opt2, width = 7,    # printed size: titles ~9 pt, axis text ~7 pt (was 16 in wide, shrunk in Word)
+                height = (ceiling(length(attr(vul_summary2, "panels")) / 6) + ceiling(length(attr(envrt_summary2, "panels")) / 6)) * 1.45 + 0.1, dpi = 300, units = "in")
 
 ## ---- 4. OBSERVED vs PREDICTED (baseline = run_base, best fit, ensemble) ------------------------
 fit_summary <- plot_obs_vs_pred(
@@ -150,14 +153,15 @@ facet_aic <- plot_ga_ensemble_faceted(
   obs, ga_runs, init_run_dir = BASE_RUN, vars = c("Biomass", "Catch", "F"),
   species_patterns = c("gag", "red grouper"),
   ens_mode = "quantile", keep_fitness_quantile = 1,   # ALL last-generation models, coloured by NLL
-  palette = "magma", plots_dir = file.path(PLOTS, "ts"))     # + baseline + best only (no grey mean)
+  palette = "plasma", plots_dir = file.path(PLOTS, "ts"))    # same colours as Figs 4-5; + baseline + best only (no grey mean)
 print(facet_aic)
 
 # best model vs AIC-weighted ensemble mean (is the mean similar to the best model?)
 facet_aic_mean <- plot_ga_ensemble_faceted(
   obs, ga_runs, init_run_dir = BASE_RUN, vars = c("Biomass", "Catch", "F"),
   species_patterns = c("gag", "red grouper"), ens_mode = "aic",
-  top_n_prop = ENS_PROP, target_ess = ENS_ESS, palette = "magma",
+  top_n_prop = ENS_PROP, target_ess = ENS_ESS, palette = "plasma",   # manuscript look (Figs 4, 5, S catch / F):
+  ylim_from_obs = FALSE,                                             # reversed plasma (yellow = best NLL), full y-axis
   plots_dir = file.path(PLOTS, "ts"))                        # gradient + baseline + best + mean
 facet_best_vs_mean <- plot_ga_ensemble_faceted(
   obs, ga_runs, init_run_dir = BASE_RUN, vars = c("Biomass", "Catch", "F"),
@@ -173,8 +177,8 @@ region_ts <- plot_region_timeseries_grid(
   ga_runs = ga_runs, species_pattern = "gag 0", init_run_dir = BASE_RUN,
   region_mask = age0_regions, region_attributes = region_attrs, obs = obs,
   domain_obs_pattern = "FWCNMFS", map_show_land = TRUE,
-  show_ensemble = TRUE, ensemble_style = "lines", palette = "magma",   # baseline + best + ALL last-generation models (colour = NLL)
-  ens_mode = "quantile", keep_fitness_quantile = 1,
+  show_ensemble = TRUE, ensemble_style = "ribbon",   # manuscript look: baseline (dashed) + AIC-weighted ensemble mean + 95% band per region
+  ens_mode = "aic", top_n_prop = ENS_PROP, target_ess = ENS_ESS,
   ensemble_max_folders = N_CAND, plots_dir = file.path(PLOTS, "ts"))
 print(table(region_ts$run, region_ts$region_id))   # an "init" row per region = baseline is drawn
 
