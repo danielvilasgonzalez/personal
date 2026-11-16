@@ -128,9 +128,23 @@ message("gag panels: ", n_vul, " vulnerability, ", n_env, " env/red tide/dispers
 # ONE grid for all panels (vulnerabilities, then responses), so every panel has the same size.
 # The vulnerability block is padded to full rows before the response panels start.
 pad_to_row <- function(pl, ncol = 6) c(pl, rep(list(patchwork::plot_spacer()), (-length(pl)) %% ncol))
-combined_opt2 <- patchwork::wrap_plots(
-  c(pad_to_row(attr(vul_summary2, "panels")), pad_to_row(attr(envrt_summary2, "panels"))),
-  ncol = 6, byrow = TRUE)
+# key to the lines/bars, placed in the first empty cell of the last row
+key_df <- data.frame(
+  y = 4:1,
+  lab = c("Final population", "Baseline model", "Best model", "Search bounds"),
+  col = c("grey45", "black", "#0072B2", "red"),
+  lt  = c("solid", "22", "solid", "22"),
+  lw  = c(2.2, 0.7, 0.7, 0.7), stringsAsFactors = FALSE)
+legend_panel <- ggplot2::ggplot(key_df) +
+  ggplot2::geom_segment(ggplot2::aes(x = 0.02, xend = 0.22, y = y, yend = y, colour = col, linetype = lt, linewidth = lw)) +
+  ggplot2::geom_text(ggplot2::aes(x = 0.27, y = y, label = lab), hjust = 0, size = 2.3) +
+  ggplot2::scale_colour_identity() + ggplot2::scale_linetype_identity() + ggplot2::scale_linewidth_identity() +
+  ggplot2::scale_x_continuous(limits = c(0, 1), expand = c(0, 0)) + ggplot2::scale_y_continuous(limits = c(0.4, 4.6), expand = c(0, 0)) +
+  ggplot2::theme_void() + ggplot2::theme(aspect.ratio = 1)
+all_panels <- c(pad_to_row(attr(vul_summary2, "panels")), pad_to_row(attr(envrt_summary2, "panels")))
+first_empty <- length(pad_to_row(attr(vul_summary2, "panels"))) + length(attr(envrt_summary2, "panels")) + 1
+if(first_empty <= length(all_panels)) all_panels[[first_empty]] <- legend_panel
+combined_opt2 <- patchwork::wrap_plots(all_panels, ncol = 6, byrow = TRUE)
 ggplot2::ggsave(file.path(PLOTS, "ts/ga_final_pop_distributions_gag_opt2_stacked.png"),
                 plot = combined_opt2, width = 7,    # printed size: titles ~9 pt, axis text ~7 pt (was 16 in wide, shrunk in Word)
                 height = (ceiling(length(attr(vul_summary2, "panels")) / 6) + ceiling(length(attr(envrt_summary2, "panels")) / 6)) * 1.45 + 0.1, dpi = 300, units = "in")
