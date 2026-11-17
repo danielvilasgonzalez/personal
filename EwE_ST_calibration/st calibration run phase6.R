@@ -171,27 +171,38 @@ make_key_panel <- function(with_uncal = TRUE){
     ggplot2::scale_y_continuous(limits = c(0.4, nrow(k) + 0.6), expand = c(0, 0)) +
     ggplot2::coord_cartesian(clip = "off") + ggplot2::theme_void() + ggplot2::theme(aspect.ratio = 1)
 }
-all_tested_figure <- function(patterns, png_name){
+all_tested_figure <- function(patterns, png_name, page_w = 8.27, ratio = 297 / 210){
   aug <- add_uncalibrated_params(tested_tbl, catalog, gapop_init, gapop_final, PARVEC)
-  common <- list(gapop_final = aug$gapop_final, gapop_init = aug$gapop_init, ga_runs = ga_runs,
-                 catalog = catalog, group_names = group_names, species_patterns = patterns,
-                 parvec = aug$parvec, uncal_ids = aug$uncal_ids, facet_ncol = 6, base_size = 9,
-                 max_title_chars = 7, title_scale = 0.75, line_scale = 0.5, panel_aspect = 1,
-                 x_axis_all = TRUE, save_plot = FALSE, plots_dir = file.path(PLOTS, "ts"))
-  sv <- do.call(plot_ga_final_pop_distributions, c(common, list(types = "vul", title_style = "names")))
-  se <- do.call(plot_ga_final_pop_distributions, c(common, list(types = c("env", "redtide", "disp"))))
-  pv <- pad_to_row(attr(sv, "panels")); pe <- pad_to_row(attr(se, "panels"))
+  build <- function(ncol){
+    common <- list(gapop_final = aug$gapop_final, gapop_init = aug$gapop_init, ga_runs = ga_runs,
+                   catalog = catalog, group_names = group_names, species_patterns = patterns,
+                   parvec = aug$parvec, uncal_ids = aug$uncal_ids, facet_ncol = ncol,
+                   base_size = if(ncol >= 8) 6.3 else 9, title_scale = if(ncol >= 8) 0.95 else 0.75,   # narrower panels: smaller text
+                   max_title_chars = 7, line_scale = if(ncol >= 8) 0.4 else 0.5, panel_aspect = 1,
+                   x_axis_all = TRUE, save_plot = FALSE, plots_dir = file.path(PLOTS, "ts"))
+    list(vul = do.call(plot_ga_final_pop_distributions, c(common, list(types = "vul", title_style = "names"))),
+         other = do.call(plot_ga_final_pop_distributions, c(common, list(types = c("env", "redtide", "disp")))))
+  }
+  # number of columns that gives the page closest to A4 portrait (panels are ~1.24 x taller than wide
+  # including the title and axis labels)
+  first <- build(6); nv <- length(attr(first$vul, "panels")); ne <- length(attr(first$other, "panels"))
+  cand <- 6:9
+  rows_for <- function(nc) ceiling(nv / nc) + ceiling(ne / nc) + as.integer(ceiling(ne / nc) * nc == ne)   # no free cell left for the key: it gets its own row
+  ratio_for <- function(nc) rows_for(nc) * 1.24 / nc
+  ncol <- cand[which.min(abs(ratio_for(cand) - ratio))]
+  b <- if(ncol == 6) first else build(ncol)
+  pv <- pad_to_row(attr(b$vul, "panels"), ncol); pe <- pad_to_row(attr(b$other, "panels"), ncol)
   allp <- c(pv, pe)
-  fe <- length(pv) + length(attr(se, "panels")) + 1
-  if(fe > length(allp)) allp <- c(allp, list(make_key_panel()), rep(list(patchwork::plot_spacer()), 5))
+  fe <- length(pv) + length(attr(b$other, "panels")) + 1
+  if(fe > length(allp)) allp <- c(allp, list(make_key_panel()), rep(list(patchwork::plot_spacer()), ncol - 1))
   else allp[[fe]] <- make_key_panel()
-  fig <- patchwork::wrap_plots(allp, ncol = 6, byrow = TRUE)
-  ggplot2::ggsave(file.path(PLOTS, "ts", png_name), plot = fig, width = 7,
-                  height = ceiling(length(allp) / 6) * 1.45 + 0.1, dpi = 300, units = "in", limitsize = FALSE)
-  message(png_name, ": ", length(attr(sv, "panels")), " vulnerability panels + ", length(attr(se, "panels")),
-          " response/dispersal panels (", sum(sv$param %in% aug$uncal_ids) + sum(se$param %in% aug$uncal_ids),
-          " parameters not calibrated)")
-  invisible(list(vul = sv, other = se))
+  fig <- patchwork::wrap_plots(allp, ncol = ncol, byrow = TRUE)
+  h <- ceiling(length(allp) / ncol) * (page_w / ncol) * 1.24 + 0.1
+  ggplot2::ggsave(file.path(PLOTS, "ts", png_name), plot = fig, width = page_w,
+                  height = h, dpi = 300, units = "in", limitsize = FALSE)
+  message(png_name, ": ", nv, " vulnerability + ", ne, " response/dispersal panels, ", ncol,
+          " columns, ", page_w, " x ", round(h, 1), " in (A4 = 8.27 x 11.69)")
+  invisible(b)
 }
 gag_all_tested    <- all_tested_figure("gag",         "ga_final_pop_distributions_gag_ALL_tested.png")
 redgrp_all_tested <- all_tested_figure("red grouper", "ga_final_pop_distributions_redgrouper_ALL_tested.png")
@@ -219,7 +230,7 @@ if(EXTRA_PLOTS){
     obs, ga_runs, init_run_dir = BASE_RUN, vars = c("Biomass", "Catch", "F"),
     species_patterns = c("gag", "red grouper"),
     ens_mode = "quantile", keep_fitness_quantile = 1,   # ALL last-generation models, coloured by NLL
-    palette = "plasma", file_suffix = "_all_models", plots_dir = file.path(PLOTS, "ts"))    # same colours as Figs 4-5; + baseline + best only
+    palette = "plasma", alpha = 1, line_width = 0.4, file_suffix = "_all_models", plots_dir = file.path(PLOTS, "ts"))    # same colours as Figs 4-5; + baseline + best only
   print(facet_aic)
 }
 
@@ -227,7 +238,7 @@ if(EXTRA_PLOTS){
 facet_aic_mean <- plot_ga_ensemble_faceted(
   obs, ga_runs, init_run_dir = BASE_RUN, vars = c("Biomass", "Catch", "F"),
   species_patterns = c("gag", "red grouper"), ens_mode = "quantile",
-  keep_fitness_quantile = ENS_PROP, show_mean = TRUE, palette = "plasma",   # manuscript look (Figs 4, 5, S catch / F):
+  keep_fitness_quantile = ENS_PROP, show_mean = TRUE, alpha = 1, line_width = 0.4, palette = "plasma",   # manuscript look (Figs 4, 5, S catch / F):
   ylim_from_obs = FALSE,                                             # reversed plasma (yellow = best NLL), full y-axis
   plots_dir = file.path(PLOTS, "ts"))                        # gradient + baseline + best + ensemble mean
 if(EXTRA_PLOTS){
