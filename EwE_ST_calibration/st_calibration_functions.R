@@ -1557,16 +1557,16 @@ plot_ga_ensemble <- function(obs = NULL,
 
 
 
-#' @title Numeric check: is the AIC-weighted ensemble mean similar to the best model?
+#' @title Numeric check: is the (equal-weight) ensemble mean similar to the best model?
 #' @description For every (variable, stanza) compares the best model's annual series with the
-#'   AIC-weighted mean of the selected ensemble. Returns correlation, mean absolute % difference
+#'   mean of the selected ensemble. Returns correlation, mean absolute % difference
 #'   and relative RMSE (RMSE / mean of the best series).
 compare_best_vs_ensemble_mean <- function(ga_runs, vars = c("Biomass", "Catch", "F"),
                                           species_patterns = c("gag", "red grouper"),
-                                          top_n_prop = 0.10, target_ess = 25){
+                                          keep_fitness_quantile = 0.10){
   valid <- ga_runs[ga_runs$exists, , drop = FALSE]
-  valid <- select_ensemble_candidates(valid, mode = "aic", top_n_prop = top_n_prop, target_ess = target_ess)
-  w <- valid$ens_weight; w[!is.finite(w)] <- 0
+  valid <- select_ensemble_candidates(valid, mode = "quantile", keep_fitness_quantile = keep_fitness_quantile)
+  w <- rep(1, nrow(valid))   # equal weights
   best <- valid[which.min(valid$fitness), ]
   caches <- setNames(lapply(seq_len(nrow(valid)), function(i) new.env(parent = emptyenv())), valid$run_folder)
   gl <- function(pr, pool_codes) pr$group_names[pool_codes + 1L]
@@ -1736,6 +1736,7 @@ plot_ga_ensemble_faceted <- function(obs = NULL,
                                      palette               = "magma",
                                      fitness_color_quantile = 0.95,
                                      show_candidates       = TRUE,   # FALSE: only baseline / best / ensemble mean
+                                     show_mean             = FALSE,  # TRUE: draw the ensemble mean (equal weights unless ens_mode = "aic")
                                      file_suffix           = "",
                                      plots_dir             = "plots",
                                      width = 10, height = 7, dpi = 150){
@@ -1959,6 +1960,10 @@ plot_ga_ensemble_faceted <- function(obs = NULL,
           wm_dt <- data.table::as.data.table(sub_pred)
           sub_wmean <- as.data.frame(wm_dt[, .(value = stats::weighted.mean(value, weight, na.rm = TRUE)),
                                            by = year])
+        } else if(show_mean){
+          # equal-weight mean of the selected candidates (quantile / topN modes)
+          wm_dt <- data.table::as.data.table(sub_pred)
+          sub_wmean <- as.data.frame(wm_dt[, .(value = mean(value, na.rm = TRUE)), by = year])
         }
         
         # include sub_init's own values in the range, not just sub_obs -- otherwise
@@ -2077,10 +2082,11 @@ plot_ga_ensemble_faceted <- function(obs = NULL,
       ref_line_labels <- c(ref_line_labels, "Best model")
       ref_line_colors <- c(ref_line_colors, "Best model" = "#20B2AA")
       ref_line_linetypes <- c(ref_line_linetypes, "Best model" = "22")
-      if(ens_mode == "aic"){
-        ref_line_labels <- c(ref_line_labels, "Ensemble mean (AIC-weighted)")
-        ref_line_colors <- c(ref_line_colors, "Ensemble mean (AIC-weighted)" = "grey30")
-        ref_line_linetypes <- c(ref_line_linetypes, "Ensemble mean (AIC-weighted)" = "solid")
+      if(ens_mode == "aic" || show_mean){
+        mean_lab <- if(ens_mode == "aic") "Ensemble mean (AIC-weighted)" else "Ensemble mean"
+        ref_line_labels <- c(ref_line_labels, mean_lab)
+        ref_line_colors <- c(ref_line_colors, stats::setNames("grey30", mean_lab))
+        ref_line_linetypes <- c(ref_line_linetypes, stats::setNames("solid", mean_lab))
       }
       ref_legend_df <- expand.grid(x = c(1, 2),
                                    line = factor(ref_line_labels, levels = ref_line_labels))
@@ -7327,6 +7333,7 @@ plot_ga_final_pop_distributions <- function(gapop_final, gapop_init, ga_runs,
                                             line_scale = 1,     # multiplies all line widths (use ~0.5 when printing small)
                                             panel_aspect = NULL,   # 1 = square panels
                                             x_axis_all = FALSE,    # TRUE = x-axis numbers and title on every panel
+                                            uncal_ids = NULL,      # ids NOT calibrated (constant at baseline): drawn as the baseline only, grey background
                                             plots_dir = "plots", png_file = NULL, save_plot = TRUE,
                                             width = NULL, height = NULL, dpi = 200){
   if(!requireNamespace("ggplot2", quietly = TRUE))
@@ -7590,7 +7597,7 @@ plot_ga_final_pop_distributions <- function(gapop_final, gapop_init, ga_runs,
   )
   
   .nospace <- function(x)
-    gsub("\\s+", "", x)
+    sub("redgrouper", "redgr", gsub("\\s+", "", x), fixed = TRUE)   # shorter titles for red grouper
   
   # abbreviate_minlength applies abbreviate() separately to each "/"-separated
   # component.
@@ -7676,6 +7683,9 @@ plot_ga_final_pop_distributions <- function(gapop_final, gapop_init, ga_runs,
     
     p1 <- parsed[[cols_g[1]]]
     sp_label <- species_of[cols_g[1]]
+    is_uncal <- !is.null(uncal_ids) && all(cols_g %in% uncal_ids)
+    uncal_bg <- if(is_uncal) ggplot2::theme(panel.background = ggplot2::element_rect(fill = "grey88")) else NULL
+    keep_l <- !is_uncal   # TRUE: draw histogram, bounds, best fit and the population
     
     # ---- compact, type-specific title + x-axis label ----
     if(p1$type == "vul"){
@@ -7937,37 +7947,53 @@ plot_ga_final_pop_distributions <- function(gapop_final, gapop_init, ga_runs,
         ggplot2::aes(x = value)
       ) +
         {
-          if(onlog)
-            ggplot2::geom_histogram(bins = 50)
-          else
-            ggplot2::geom_histogram(bins = 40)
+          if(keep_l){
+            if(onlog)
+              ggplot2::geom_histogram(bins = 50)
+            else
+              ggplot2::geom_histogram(bins = 40)
+          } else
+            ggplot2::coord_cartesian(ylim = c(0, 150))
         } +
-        ggplot2::geom_vline(
-          xintercept = b[1],
-          color = "red",
-          linetype = "22",
-          linewidth = 0.8 * line_scale
-        ) +
-        ggplot2::geom_vline(
-          xintercept = b[2],
-          color = "red",
-          linetype = "22",
-          linewidth = 0.8 * line_scale
-        ) +
+        {
+          if(keep_l)
+            ggplot2::geom_vline(
+              xintercept = b[1],
+              color = "red",
+              linetype = "22",
+              linewidth = 0.8 * line_scale
+            )
+        } +
+        {
+          if(keep_l)
+            ggplot2::geom_vline(
+              xintercept = b[2],
+              color = "red",
+              linetype = "22",
+              linewidth = 0.8 * line_scale
+            )
+        } +
         ggplot2::geom_vline(
           xintercept = baseline[col],
           color = "black",
           linetype = "22",
           linewidth = 1 * line_scale
         ) +
-        ggplot2::geom_vline(
-          xintercept = best[col],
-          color = "#0072B2",
-          linewidth = 1 * line_scale
-        ) +
         {
-          if(onlog)
-            ggplot2::scale_x_log10()
+          if(keep_l)
+            ggplot2::geom_vline(
+              xintercept = best[col],
+              color = "#0072B2",
+              linewidth = 1 * line_scale
+            )
+        } +
+        {
+          if(onlog){
+            if(keep_l) ggplot2::scale_x_log10(labels = scales::label_number(scale_cut = scales::cut_short_scale()))
+            else ggplot2::scale_x_log10(limits = c(1, max(2000, 3 * baseline[col])),
+                                        labels = scales::label_number(scale_cut = scales::cut_short_scale()))
+          } else if(!keep_l)
+            ggplot2::scale_x_continuous(limits = baseline[col] * c(0.5, 1.5))
         } +
         title_layer +
         ggplot2::labs(
@@ -7980,7 +8006,8 @@ plot_ga_final_pop_distributions <- function(gapop_final, gapop_init, ga_runs,
         ) +
         title_theme +
         axis_title_theme +
-        (if(!is.null(panel_aspect)) ggplot2::theme(aspect.ratio = panel_aspect) else NULL)
+        (if(!is.null(panel_aspect)) ggplot2::theme(aspect.ratio = panel_aspect) else NULL) +
+        uncal_bg
       
       panel_list[[grp]] <- pp
       next
@@ -8390,37 +8417,46 @@ plot_ga_final_pop_distributions <- function(gapop_final, gapop_init, ga_runs,
       NULL
     
     pp <- ggplot2::ggplot() +
-      ggplot2::geom_line(
-        data = curves,
-        ggplot2::aes(
-          x = x,
-          y = y,
-          group = k
-        ),
-        color = "grey60",
-        alpha = 0.12,
-        linewidth = 0.3 * line_scale
-      ) +
-      ggplot2::geom_line(
-        data = bound_lo_curve,
-        ggplot2::aes(
-          x = x,
-          y = y
-        ),
-        color = "red",
-        linetype = "22",
-        linewidth = 0.8 * line_scale
-      ) +
-      ggplot2::geom_line(
-        data = bound_hi_curve,
-        ggplot2::aes(
-          x = x,
-          y = y
-        ),
-        color = "red",
-        linetype = "22",
-        linewidth = 0.8 * line_scale
-      ) +
+      {
+        if(keep_l)
+          ggplot2::geom_line(
+            data = curves,
+            ggplot2::aes(
+              x = x,
+              y = y,
+              group = k
+            ),
+            color = "grey60",
+            alpha = 0.12,
+            linewidth = 0.3 * line_scale
+          )
+      } +
+      {
+        if(keep_l)
+          ggplot2::geom_line(
+            data = bound_lo_curve,
+            ggplot2::aes(
+              x = x,
+              y = y
+            ),
+            color = "red",
+            linetype = "22",
+            linewidth = 0.8 * line_scale
+          )
+      } +
+      {
+        if(keep_l)
+          ggplot2::geom_line(
+            data = bound_hi_curve,
+            ggplot2::aes(
+              x = x,
+              y = y
+            ),
+            color = "red",
+            linetype = "22",
+            linewidth = 0.8 * line_scale
+          )
+      } +
       ggplot2::geom_line(
         data = base_curve,
         ggplot2::aes(
@@ -8431,15 +8467,18 @@ plot_ga_final_pop_distributions <- function(gapop_final, gapop_init, ga_runs,
         linetype = "22",
         linewidth = 1 * line_scale
       ) +
-      ggplot2::geom_line(
-        data = best_curve,
-        ggplot2::aes(
-          x = x,
-          y = y
-        ),
-        color = "#0072B2",
-        linewidth = 1 * line_scale
-      ) +
+      {
+        if(keep_l)
+          ggplot2::geom_line(
+            data = best_curve,
+            ggplot2::aes(
+              x = x,
+              y = y
+            ),
+            color = "#0072B2",
+            linewidth = 1 * line_scale
+          )
+      } +
       title_layer +
       ggplot2::labs(
         title = labs_title,
@@ -8468,7 +8507,8 @@ plot_ga_final_pop_distributions <- function(gapop_final, gapop_init, ga_runs,
       ) +
       title_theme +
       axis_title_theme +
-      (if(!is.null(panel_aspect)) ggplot2::theme(aspect.ratio = panel_aspect) else NULL)
+      (if(!is.null(panel_aspect)) ggplot2::theme(aspect.ratio = panel_aspect) else NULL) +
+      uncal_bg
     
     panel_list[[grp]] <- pp
   }
@@ -9786,4 +9826,46 @@ plot_tested_vs_calibrated <- function(sens_xlsx, parvec, gapop_init, gapop_final
   ggplot2::ggsave(file.path(plots_dir, png_file), p, width = 9, height = max(4, 0.17 * nrow(pd) + 1.5),
                   dpi = 200, units = "in", limitsize = FALSE)
   invisible(out)
+}
+
+
+#' Add the parameters that were tested but NOT calibrated to the GA tables, as constants at baseline.
+#'
+#' plot_ga_final_pop_distributions() draws what is in the GA population. To show every tested
+#' parameter of a species in the same figure, each uncalibrated parameter is added as a column that
+#' is constant at its baseline value (and as a parvec row with both bounds at the baseline). Pass the
+#' returned `uncal_ids` to plot_ga_final_pop_distributions(): those panels are drawn as the baseline
+#' only, on a grey background.
+#' @param tested_tbl output of plot_tested_vs_calibrated() (columns type, id, baseline, calibrated).
+#' @return list(gapop_init, gapop_final, parvec, uncal_ids)
+add_uncalibrated_params <- function(tested_tbl, catalog, gapop_init, gapop_final, parvec){
+  if(is.character(parvec)) parvec <- utils::read.csv(parvec, row.names = 1, check.names = FALSE)
+  unc <- tested_tbl[!tested_tbl$calibrated, , drop = FALSE]
+  sub_names <- list(`9` = c("mid.adj", "width.adj"), `10` = c("xmid.adj", "slope.adj"),
+                    `11` = c("inflection.adj", "slope.adj"), `6` = c("mean.adj", "width.adj"))
+  newv <- list()   # column name -> baseline value
+  for(i in seq_len(nrow(unc))){
+    if(unc$type[i] %in% c("Vulnerability", "Dispersal rate")){
+      newv[[unc$id[i]]] <- unc$baseline[i]
+    } else if(unc$type[i] == "Response curve"){
+      idx <- as.integer(sub("^curve_", "", unc$id[i]))
+      r <- catalog[catalog$group_index == idx, , drop = FALSE][1, ]
+      shp <- as.character(r$shape_type)
+      if(!shp %in% names(sub_names)) next
+      pre <- if(identical(as.character(r$driver), "red tide")) "rt" else "env"
+      nm <- paste0(pre, idx, "_type", shp, "_", sub_names[[shp]])
+      for(k in nm) newv[[k]] <- 1
+    }
+  }
+  newv <- newv[!names(newv) %in% names(gapop_final)]
+  for(nm in names(newv)){
+    gapop_init[[nm]]  <- newv[[nm]]
+    gapop_final[[nm]] <- newv[[nm]]
+    row <- parvec[1, , drop = FALSE]; row[] <- NA
+    row$L.bounds <- newv[[nm]]; row$U.bounds <- newv[[nm]]
+    if("est_par_vec" %in% names(row)) row$est_par_vec <- newv[[nm]]
+    rownames(row) <- nm
+    parvec <- rbind(parvec, row)
+  }
+  list(gapop_init = gapop_init, gapop_final = gapop_final, parvec = parvec, uncal_ids = names(newv))
 }

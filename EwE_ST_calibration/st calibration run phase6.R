@@ -29,10 +29,13 @@ for(d in file.path(PLOTS, c("ts", "spatial", "residuals", "response")))
 
 ## ---- SETTINGS THAT DEPEND ON THIS RUN ----------------------------------------------------------
 LAST_GEN <- 30      # last generation in ga_results (the old run used 27)
-# ensemble = best ENS_PROP of the final population, weighted by AIC. 370 x 0.10 = 37 candidates, so
-# target_ess must stay BELOW 37 (50 would fall back to near-uniform weights). To keep 50, use 0.20.
+# ensemble = the best ENS_PROP of the final population (lowest NLL), equal weights: 370 x 0.10 = 37 models.
 ENS_PROP <- 0.10
-ENS_ESS  <- 25
+
+# FALSE = only the figures used in the manuscript and its supplement. TRUE = also the extra
+# diagnostics (obs vs predicted for baseline and best, all-models time series, best-vs-mean figure,
+# generation-by-generation best, per-group red tide mortality, response functions by driver, RRMSE).
+EXTRA_PLOTS <- FALSE
 
 library(data.table); library(ggplot2); library(patchwork); library(scales)
 if(requireNamespace("RColorBrewer", quietly = TRUE)) library(RColorBrewer)
@@ -136,11 +139,11 @@ key_df <- data.frame(
   lt  = c("solid", "22", "solid", "22"),
   lw  = c(2.2, 0.7, 0.7, 0.7), stringsAsFactors = FALSE)
 legend_panel <- ggplot2::ggplot(key_df) +
-  ggplot2::geom_segment(ggplot2::aes(x = 0.02, xend = 0.22, y = y, yend = y, colour = col, linetype = lt, linewidth = lw)) +
-  ggplot2::geom_text(ggplot2::aes(x = 0.27, y = y, label = lab), hjust = 0, size = 2.3) +
+  ggplot2::geom_segment(ggplot2::aes(x = 0.0, xend = 0.2, y = y, yend = y, colour = col, linetype = lt, linewidth = lw)) +
+  ggplot2::geom_text(ggplot2::aes(x = 0.25, y = y, label = lab), hjust = 0, size = 2.2) +
   ggplot2::scale_colour_identity() + ggplot2::scale_linetype_identity() + ggplot2::scale_linewidth_identity() +
-  ggplot2::scale_x_continuous(limits = c(0, 1), expand = c(0, 0)) + ggplot2::scale_y_continuous(limits = c(0.4, 4.6), expand = c(0, 0)) +
-  ggplot2::theme_void() + ggplot2::theme(aspect.ratio = 1)
+  ggplot2::scale_x_continuous(limits = c(-0.14, 1.08), expand = c(0, 0)) + ggplot2::scale_y_continuous(limits = c(0.4, 4.6), expand = c(0, 0)) +
+  ggplot2::coord_cartesian(clip = "off") + ggplot2::theme_void() + ggplot2::theme(aspect.ratio = 1)
 all_panels <- c(pad_to_row(attr(vul_summary2, "panels")), pad_to_row(attr(envrt_summary2, "panels")))
 first_empty <- length(pad_to_row(attr(vul_summary2, "panels"))) + length(attr(envrt_summary2, "panels")) + 1
 if(first_empty <= length(all_panels)) all_panels[[first_empty]] <- legend_panel
@@ -149,40 +152,93 @@ ggplot2::ggsave(file.path(PLOTS, "ts/ga_final_pop_distributions_gag_opt2_stacked
                 plot = combined_opt2, width = 7,    # printed size: titles ~9 pt, axis text ~7 pt (was 16 in wide, shrunk in Word)
                 height = (ceiling(length(attr(vul_summary2, "panels")) / 6) + ceiling(length(attr(envrt_summary2, "panels")) / 6)) * 1.45 + 0.1, dpi = 300, units = "in")
 
+## ---- 3b. ALL tested parameters (calibrated + not calibrated) for gag and for red grouper -------
+# Same layout as the figure above. Parameters that were tested in the sensitivity analysis but not
+# calibrated keep their baseline value: grey panels showing only the baseline (black dashed line).
+make_key_panel <- function(with_uncal = TRUE){
+  k <- data.frame(
+    lab = c("Final population", "Baseline model", "Best model", "Search bounds", "Not calibrated\n(baseline only)"),
+    col = c("grey45", "black", "#0072B2", "red", "grey80"),
+    lt  = c("solid", "22", "solid", "22", "solid"),
+    lw  = c(2.2, 0.7, 0.7, 0.7, 4), stringsAsFactors = FALSE)
+  if(!with_uncal) k <- k[1:4, ]
+  k$y <- rev(seq_len(nrow(k)))
+  ggplot2::ggplot(k) +
+    ggplot2::geom_segment(ggplot2::aes(x = 0.0, xend = 0.2, y = y, yend = y, colour = col, linetype = lt, linewidth = lw)) +
+    ggplot2::geom_text(ggplot2::aes(x = 0.25, y = y, label = lab), hjust = 0, size = 2.2, lineheight = 0.85) +
+    ggplot2::scale_colour_identity() + ggplot2::scale_linetype_identity() + ggplot2::scale_linewidth_identity() +
+    ggplot2::scale_x_continuous(limits = c(-0.14, 1.08), expand = c(0, 0)) +
+    ggplot2::scale_y_continuous(limits = c(0.4, nrow(k) + 0.6), expand = c(0, 0)) +
+    ggplot2::coord_cartesian(clip = "off") + ggplot2::theme_void() + ggplot2::theme(aspect.ratio = 1)
+}
+all_tested_figure <- function(patterns, png_name){
+  aug <- add_uncalibrated_params(tested_tbl, catalog, gapop_init, gapop_final, PARVEC)
+  common <- list(gapop_final = aug$gapop_final, gapop_init = aug$gapop_init, ga_runs = ga_runs,
+                 catalog = catalog, group_names = group_names, species_patterns = patterns,
+                 parvec = aug$parvec, uncal_ids = aug$uncal_ids, facet_ncol = 6, base_size = 9,
+                 max_title_chars = 7, title_scale = 0.75, line_scale = 0.5, panel_aspect = 1,
+                 x_axis_all = TRUE, save_plot = FALSE, plots_dir = file.path(PLOTS, "ts"))
+  sv <- do.call(plot_ga_final_pop_distributions, c(common, list(types = "vul", title_style = "names")))
+  se <- do.call(plot_ga_final_pop_distributions, c(common, list(types = c("env", "redtide", "disp"))))
+  pv <- pad_to_row(attr(sv, "panels")); pe <- pad_to_row(attr(se, "panels"))
+  allp <- c(pv, pe)
+  fe <- length(pv) + length(attr(se, "panels")) + 1
+  if(fe > length(allp)) allp <- c(allp, list(make_key_panel()), rep(list(patchwork::plot_spacer()), 5))
+  else allp[[fe]] <- make_key_panel()
+  fig <- patchwork::wrap_plots(allp, ncol = 6, byrow = TRUE)
+  ggplot2::ggsave(file.path(PLOTS, "ts", png_name), plot = fig, width = 7,
+                  height = ceiling(length(allp) / 6) * 1.45 + 0.1, dpi = 300, units = "in", limitsize = FALSE)
+  message(png_name, ": ", length(attr(sv, "panels")), " vulnerability panels + ", length(attr(se, "panels")),
+          " response/dispersal panels (", sum(sv$param %in% aug$uncal_ids) + sum(se$param %in% aug$uncal_ids),
+          " parameters not calibrated)")
+  invisible(list(vul = sv, other = se))
+}
+gag_all_tested    <- all_tested_figure("gag",         "ga_final_pop_distributions_gag_ALL_tested.png")
+redgrp_all_tested <- all_tested_figure("red grouper", "ga_final_pop_distributions_redgrouper_ALL_tested.png")
+
 ## ---- 4. OBSERVED vs PREDICTED (baseline = run_base, best fit, ensemble) ------------------------
-fit_summary <- plot_obs_vs_pred(
-  obs, runs = c(baseline = BASE_RUN, best_fit = best_dir),
-  vars = c("Biomass", "Catch", "F"), plots_dir = file.path(PLOTS, "ts"))
-print(fit_summary[, c("variable", "group_label", "region_codes", "runs_plotted", "png_file", "missing_by_run")])
+if(EXTRA_PLOTS){
+  fit_summary <- plot_obs_vs_pred(
+    obs, runs = c(baseline = BASE_RUN, best_fit = best_dir),
+    vars = c("Biomass", "Catch", "F"), plots_dir = file.path(PLOTS, "ts"))
+  print(fit_summary[, c("variable", "group_label", "region_codes", "runs_plotted", "png_file", "missing_by_run")])
 
-diag <- diagnose_candidate_outputs(ga_runs, vars = c("Biomass", "Catch"))
+  diag <- diagnose_candidate_outputs(ga_runs, vars = c("Biomass", "Catch"))
+}
 
-ens_summary <- plot_ga_ensemble(
-  obs, ga_runs, init_run_dir = BASE_RUN, vars = c("Biomass", "Catch", "F"),
-  species_patterns = c("gag", "red grouper"),
-  plots_dir = file.path(PLOTS, "ts"))
-print(ens_summary)
+if(EXTRA_PLOTS){
+  ens_summary <- plot_ga_ensemble(
+    obs, ga_runs, init_run_dir = BASE_RUN, vars = c("Biomass", "Catch", "F"),
+    species_patterns = c("gag", "red grouper"),
+    plots_dir = file.path(PLOTS, "ts"))
+  print(ens_summary)
+}
 
-facet_aic <- plot_ga_ensemble_faceted(
-  obs, ga_runs, init_run_dir = BASE_RUN, vars = c("Biomass", "Catch", "F"),
-  species_patterns = c("gag", "red grouper"),
-  ens_mode = "quantile", keep_fitness_quantile = 1,   # ALL last-generation models, coloured by NLL
-  palette = "plasma", plots_dir = file.path(PLOTS, "ts"))    # same colours as Figs 4-5; + baseline + best only (no grey mean)
-print(facet_aic)
+if(EXTRA_PLOTS){
+  facet_aic <- plot_ga_ensemble_faceted(
+    obs, ga_runs, init_run_dir = BASE_RUN, vars = c("Biomass", "Catch", "F"),
+    species_patterns = c("gag", "red grouper"),
+    ens_mode = "quantile", keep_fitness_quantile = 1,   # ALL last-generation models, coloured by NLL
+    palette = "plasma", file_suffix = "_all_models", plots_dir = file.path(PLOTS, "ts"))    # same colours as Figs 4-5; + baseline + best only
+  print(facet_aic)
+}
 
-# best model vs AIC-weighted ensemble mean (is the mean similar to the best model?)
+# Figs 4-5 and supplementary catch / F: the best ENS_PROP of the final population, coloured by NLL, + baseline + best
 facet_aic_mean <- plot_ga_ensemble_faceted(
   obs, ga_runs, init_run_dir = BASE_RUN, vars = c("Biomass", "Catch", "F"),
-  species_patterns = c("gag", "red grouper"), ens_mode = "aic",
-  top_n_prop = ENS_PROP, target_ess = ENS_ESS, palette = "plasma",   # manuscript look (Figs 4, 5, S catch / F):
+  species_patterns = c("gag", "red grouper"), ens_mode = "quantile",
+  keep_fitness_quantile = ENS_PROP, show_mean = TRUE, palette = "plasma",   # manuscript look (Figs 4, 5, S catch / F):
   ylim_from_obs = FALSE,                                             # reversed plasma (yellow = best NLL), full y-axis
-  plots_dir = file.path(PLOTS, "ts"))                        # gradient + baseline + best + mean
-facet_best_vs_mean <- plot_ga_ensemble_faceted(
-  obs, ga_runs, init_run_dir = BASE_RUN, vars = c("Biomass", "Catch", "F"),
-  species_patterns = c("gag", "red grouper"), ens_mode = "aic",
-  top_n_prop = ENS_PROP, target_ess = ENS_ESS, show_candidates = FALSE, file_suffix = "_best_vs_mean",
-  plots_dir = file.path(PLOTS, "ts"))                        # ONLY baseline + best + mean
-best_vs_mean <- compare_best_vs_ensemble_mean(ga_runs, top_n_prop = ENS_PROP, target_ess = ENS_ESS)
+  plots_dir = file.path(PLOTS, "ts"))                        # gradient + baseline + best + ensemble mean
+if(EXTRA_PLOTS){
+  facet_best_vs_mean <- plot_ga_ensemble_faceted(
+    obs, ga_runs, init_run_dir = BASE_RUN, vars = c("Biomass", "Catch", "F"),
+    species_patterns = c("gag", "red grouper"), ens_mode = "quantile",
+    keep_fitness_quantile = ENS_PROP, show_mean = TRUE, show_candidates = FALSE, file_suffix = "_best_vs_mean",
+    plots_dir = file.path(PLOTS, "ts"))                        # ONLY baseline + best + mean
+}
+
+best_vs_mean <- compare_best_vs_ensemble_mean(ga_runs, keep_fitness_quantile = ENS_PROP)
 print(best_vs_mean)   # correlation, mean |% difference|, relative RMSE per stanza and variable
 write.csv(best_vs_mean, file.path(PLOTS, "ts", "best_vs_ensemble_mean.csv"), row.names = FALSE)
 
@@ -191,14 +247,16 @@ region_ts <- plot_region_timeseries_grid(
   ga_runs = ga_runs, species_pattern = "gag 0", init_run_dir = BASE_RUN,
   region_mask = age0_regions, region_attributes = region_attrs, obs = obs,
   domain_obs_pattern = "FWCNMFS", map_show_land = TRUE,
-  show_ensemble = TRUE, ensemble_style = "ribbon",   # manuscript look: baseline (dashed) + AIC-weighted ensemble mean + 95% band per region
-  ens_mode = "aic", top_n_prop = ENS_PROP, target_ess = ENS_ESS,
+  show_ensemble = TRUE, ensemble_style = "ribbon",   # manuscript look: baseline (dashed) + ensemble mean + 95% band per region
+  ens_mode = "quantile", keep_fitness_quantile = ENS_PROP,
   ensemble_max_folders = N_CAND, plots_dir = file.path(PLOTS, "ts"))
 print(table(region_ts$run, region_ts$region_id))   # an "init" row per region = baseline is drawn
 
-gen_summary <- plot_ga_generation_best(
-  obs, ga_runs, init_run_dir = BASE_RUN, vars = c("Biomass", "Catch", "F"),
-  species_patterns = c("gag", "red grouper"), palette = "magma", plots_dir = file.path(PLOTS, "ts"))
+if(EXTRA_PLOTS){
+  gen_summary <- plot_ga_generation_best(
+    obs, ga_runs, init_run_dir = BASE_RUN, vars = c("Biomass", "Catch", "F"),
+    species_patterns = c("gag", "red grouper"), palette = "magma", plots_dir = file.path(PLOTS, "ts"))
+}
 
 ## ---- 5. SPATIAL MAPS, RED TIDE MORTALITY, RESIDUALS --------------------------------------------
 map_root_dir <- DATA_DIR
@@ -209,8 +267,8 @@ n_cores_available <- if(.Platform$OS.type == "unix" && requireNamespace("paralle
 lon_breaks <- seq(-86, -82, by = 2); lat_breaks <- seq(26, 30, by = 2)
 
 ens_map_summary_aic <- plot_ecospace_ensemble_maps_paired(
-  map_root_dir = map_root_dir, ga_runs = ga_runs, run_folders = all_folders, ens_mode = "aic",
-  top_n_prop = ENS_PROP, target_ess = ENS_ESS, species_patterns = c("gag", "red grouper"),
+  map_root_dir = map_root_dir, ga_runs = ga_runs, run_folders = all_folders, ens_mode = "quantile",
+  keep_fitness_quantile = ENS_PROP, species_patterns = c("gag", "red grouper"),
   vars = c("Biomass", "Catch", "F"), variability = NULL, log_scale = TRUE,
   max_folders = N_CAND, n_cores = n_cores_available, land_mask = land_mask,
   lon_breaks = lon_breaks, lat_breaks = lat_breaks, stanzas_per_row = 3,
@@ -218,8 +276,8 @@ ens_map_summary_aic <- plot_ecospace_ensemble_maps_paired(
 print(ens_map_summary_aic)
 
 ens_map_paired_summary_aic <- plot_ecospace_ensemble_maps_paired(
-  map_root_dir = map_root_dir, ga_runs = ga_runs, run_folders = all_folders, ens_mode = "aic",
-  top_n_prop = ENS_PROP, target_ess = ENS_ESS, species_patterns = c("gag", "red grouper"),
+  map_root_dir = map_root_dir, ga_runs = ga_runs, run_folders = all_folders, ens_mode = "quantile",
+  keep_fitness_quantile = ENS_PROP, species_patterns = c("gag", "red grouper"),
   vars = c("Biomass", "Catch", "F"), variability = "cv", log_scale = TRUE,
   max_folders = N_CAND, n_cores = n_cores_available, land_mask = land_mask,
   lon_breaks = lon_breaks, lat_breaks = lat_breaks, stanzas_per_row = 2,
@@ -228,47 +286,52 @@ print(ens_map_paired_summary_aic)
 
 m0_groups <- c(paste0("gag ", c(0:4, "5+")), paste0("red grouper ", c(0:4, "5+")),
                "gag total", "red grouper total")
-ens_m0_aic <- plot_ecospace_ensemble_m0(
-  map_root_dir = map_root_dir, ga_runs = ga_runs, ens_mode = "aic",
-  top_n_prop = ENS_PROP, target_ess = ENS_ESS, run_folders = all_folders,
-  species_patterns = c("gag", "red grouper"), groups = m0_groups,
-  max_folders = N_CAND, plots_dir = file.path(PLOTS, "ts"))
-print(ens_m0_aic)
+if(EXTRA_PLOTS){
+  ens_m0_aic <- plot_ecospace_ensemble_m0(
+    map_root_dir = map_root_dir, ga_runs = ga_runs, ens_mode = "quantile",
+    keep_fitness_quantile = ENS_PROP, run_folders = all_folders,
+    species_patterns = c("gag", "red grouper"), groups = m0_groups,
+    max_folders = N_CAND, plots_dir = file.path(PLOTS, "ts"))
+  print(ens_m0_aic)
+}
 
 ens_m0_single <- plot_ecospace_ensemble_m0(
-  map_root_dir = map_root_dir, ga_runs = ga_runs, ens_mode = "aic",
-  top_n_prop = ENS_PROP, target_ess = ENS_ESS, run_folders = all_folders,
+  map_root_dir = map_root_dir, ga_runs = ga_runs, ens_mode = "quantile",
+  keep_fitness_quantile = ENS_PROP, run_folders = all_folders,
   species_patterns = c("gag", "red grouper"), groups = m0_groups,
   max_folders = N_CAND, single_plot = TRUE, single_plot_uncertainty = TRUE,
   y_lab = expression("Red tide mortality"~(year^{-1})), plots_dir = file.path(PLOTS, "ts"))
 print(ens_m0_single)
 
 resid_faceted_aic <- plot_spatial_residuals_batch(
-  raster_dir = MAXN_DIR, ga_runs = ga_runs, ens_mode = "aic",
-  top_n_prop = ENS_PROP, target_ess = ENS_ESS, species_patterns = c("gag", "red grouper"),
+  raster_dir = MAXN_DIR, ga_runs = ga_runs, ens_mode = "quantile",
+  keep_fitness_quantile = ENS_PROP, species_patterns = c("gag", "red grouper"),
   land_mask = land_mask, lon_breaks = lon_breaks, lat_breaks = lat_breaks,
   barheight = 2.8, barwidth = 0.45, facet_ncol = 3, plots_dir = file.path(PLOTS, "residuals"))
 print(resid_faceted_aic)
 
 resid_faceted_older_aic <- plot_spatial_residuals_older_stanzas(
-  raster_dir = MAXN_DIR, ga_runs = ga_runs, ens_mode = "aic",
-  top_n_prop = ENS_PROP, target_ess = ENS_ESS, land_mask = land_mask,
+  raster_dir = MAXN_DIR, ga_runs = ga_runs, ens_mode = "quantile",
+  keep_fitness_quantile = ENS_PROP, land_mask = land_mask,
   lon_breaks = lon_breaks, lat_breaks = lat_breaks, barheight = 2.8, barwidth = 0.45,
   facet_ncol = 3, plots_dir = file.path(PLOTS, "residuals"))
 print(resid_faceted_older_aic)
 
 ## ---- 6. RESPONSE FUNCTIONS ---------------------------------------------------------------------
-driver_map <- build_driver_map_from_sensitivity(ga_runs, catalog)
-print(driver_map)
-for(drv in c("depth", "temp", "red tide"))
-  plot_ga_response_by_driver_map(
-    ga_runs, driver_map, driver_name = drv, species_patterns = c("gag", "red grouper"),
-    keep_fitness_quantile = 0.9, max_folders = N_CAND, catalog = catalog,
-    plots_dir = file.path(PLOTS, "response"))
+if(EXTRA_PLOTS){
+  driver_map <- build_driver_map_from_sensitivity(ga_runs, catalog)
+  print(driver_map)
+  for(drv in c("depth", "temp", "red tide"))
+    plot_ga_response_by_driver_map(
+      ga_runs, driver_map, driver_name = drv, species_patterns = c("gag", "red grouper"),
+      keep_fitness_quantile = 0.9, max_folders = N_CAND, catalog = catalog,
+      plots_dir = file.path(PLOTS, "response"))
 
-rrmse_df  <- compute_rrmse_by_candidate(obs, ga_runs, vars = c("Biomass", "Catch", "F"),
-                                        species_patterns = c("gag", "red grouper"),
-                                        max_candidates = 1000)
-rrmse_cor <- plot_rrmse_vs_fitness(rrmse_df, facet_by = "series", plots_dir = file.path(PLOTS, "ts"))
-print(rrmse_cor)
+  rrmse_df  <- compute_rrmse_by_candidate(obs, ga_runs, vars = c("Biomass", "Catch", "F"),
+                                          species_patterns = c("gag", "red grouper"),
+                                          max_candidates = 1000)
+  rrmse_cor <- plot_rrmse_vs_fitness(rrmse_df, facet_by = "series", plots_dir = file.path(PLOTS, "ts"))
+  print(rrmse_cor)
+}
+
 message("Done. Figures are in ", PLOTS)
