@@ -21,8 +21,7 @@ SPATIAL_WEIGHT <- 15
 options(warn = 1)
 if (requireNamespace("R4EwE", quietly = TRUE)) { suppressMessages(library(R4EwE)) } else {
   system.file <- function(..., package = "") if (package == "R4EwE") file.path(R4_DIR, "inst", ...) else base::system.file(..., package = package)
-  for (f in c("globals.R", "utils.R", "input_output.R", "Ecospace_objective_functions.R", "Spatial_likelihood.R"))
-    suppressMessages(source(file.path(R4_DIR, "R", f)))
+  for (f in c("globals.R", "utils.R", "input_output.R", "Ecospace_objective_functions.R", "Spatial_likelihood.R", "fn.ecospace_gif.R"))    suppressMessages(source(file.path(R4_DIR, "R", f)))
 }
 inp <- file.path(RUN, "inputs")
 vuls <- read.csv(file.path(inp, "WFS-MICE EwE 2.13 v67020-Vulnerabilities.csv"), row.names = 1)
