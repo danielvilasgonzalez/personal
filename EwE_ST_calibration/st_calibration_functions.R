@@ -107,13 +107,14 @@ plot_nll_convergence_panel <- function(ga2, primary_col, primary_label, primary_
                                        sd_max = 150000, gen_breaks = NULL,
                                        primary_min = 0,
                                        legend_position = c(0.95, 0.95),
-                                       legend_justification = c(1, 1)){
+                                       legend_justification = c(1, 1),
+                                       baseline = NULL, baseline_label = NULL){
   if(!requireNamespace("ggplot2", quietly = TRUE))
     stop("Package 'ggplot2' is required. Install it with install.packages('ggplot2').")
   
   primary_vals <- ga2[[primary_col]]
   sd_vals <- ga2[[sd_col]]
-  primary_range <- range(primary_vals, na.rm = TRUE)
+  primary_range <- range(c(primary_vals, baseline), na.rm = TRUE)   # baseline (optional) is drawn as a dashed line
   if(primary_min > primary_range[1])
     message("plot_nll_convergence_panel(): primary_min (", primary_min, ") is ABOVE the actual ",
             "minimum of '", primary_col, "' (", signif(primary_range[1], 6), ") -- the lowest ",
@@ -169,6 +170,10 @@ plot_nll_convergence_panel <- function(ga2, primary_col, primary_label, primary_
                        linewidth = 1, alpha = 0.7) +
     ggplot2::geom_point(ggplot2::aes(y = .sd_scaled, colour = sd_label),
                         shape = 16, size = 1.6, alpha = 0.7) +
+    {if(!is.null(baseline)) list(
+      ggplot2::geom_hline(yintercept = baseline, linetype = "dashed", colour = "grey35", linewidth = 0.6),
+      if(!is.null(baseline_label)) ggplot2::annotate("text", x = mean(range(ga2$gen, na.rm = TRUE)) * 0.4, y = baseline, hjust = 0.5, vjust = -0.5, size = 3.2,
+                        colour = "grey35", label = paste0(baseline_label, " (", format(round(baseline), big.mark = ","), ")")))} +
     ggplot2::scale_colour_manual(values = colors, name = NULL) +
     # scale_y_continuous(limits=), NOT coord_cartesian() -- this is what makes sec_axis()
     # actually respect primary_min/sd_max. coord_cartesian() only zooms the VIEW; it
@@ -248,14 +253,15 @@ plot_nll_mean_median_max_panel <- function(ga2,
                                            max_max = NULL, gen_breaks = NULL,
                                            primary_min = 0,
                                            legend_position = c(0.95, 0.95),
-                                           legend_justification = c(1, 1)){
+                                           legend_justification = c(1, 1),
+                                           baseline = NULL, baseline_label = NULL){
   if(!requireNamespace("ggplot2", quietly = TRUE))
     stop("Package 'ggplot2' is required. Install it with install.packages('ggplot2').")
   
   mean_vals   <- ga2[[mean_col]]
   median_vals <- ga2[[median_col]]
   max_vals    <- ga2[[max_col]]
-  primary_range <- range(c(mean_vals, median_vals), na.rm = TRUE)
+  primary_range <- range(c(mean_vals, median_vals, baseline), na.rm = TRUE)   # baseline (optional) is drawn as a dashed line
   if(primary_min > primary_range[1])
     message("plot_nll_mean_median_max_panel(): primary_min (", primary_min, ") is ABOVE the actual ",
             "minimum of '", mean_col, "'/'", median_col, "' (", signif(primary_range[1], 6), ") -- the ",
@@ -305,9 +311,13 @@ plot_nll_mean_median_max_panel <- function(ga2,
                        linewidth = 1, alpha = 0.7) +
     ggplot2::geom_point(ggplot2::aes(y = .max_scaled, colour = max_label),
                         shape = 16, size = 1.6, alpha = 0.7) +
+    {if(!is.null(baseline)) list(
+      ggplot2::geom_hline(yintercept = baseline, linetype = "dashed", colour = "grey35", linewidth = 0.6),
+      if(!is.null(baseline_label)) ggplot2::annotate("text", x = mean(range(ga2$gen, na.rm = TRUE)) * 0.4, y = baseline, hjust = 0.5, vjust = -0.5, size = 3.2,
+                        colour = "grey35", label = paste0(baseline_label, " (", format(round(baseline), big.mark = ","), ")")))} +
     ggplot2::scale_colour_manual(values = colors, name = NULL) +
     ggplot2::scale_y_continuous(
-      name = "mean / median NLL",
+      name = "mean and median NLL",
       limits = y_limits,
       sec.axis = ggplot2::sec_axis(~ (. - offs) / sf, name = max_label)
     ) +

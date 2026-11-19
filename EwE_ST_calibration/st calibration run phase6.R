@@ -62,15 +62,19 @@ catalog <- read_sensitivity_response_catalog(SENS_XLSX)
 ## ---- 2. GA CONVERGENCE -------------------------------------------------------------------------
 ga <- read.csv(file.path(RUN, "results", paste0("ga_results_", LABEL, ".csv")),
                skip = 6, header = TRUE, stringsAsFactors = FALSE, check.names = FALSE)
-ga2 <- subset(ga, gen >= 0 & gen <= LAST_GEN)       # gen -1 is the baseline row, left out
+ga2 <- subset(ga, gen >= 0 & gen <= LAST_GEN)       # gen -1 is the baseline row, left out of the lines
+baseline_NLL <- ga$min_LL[ga$gen == -1]             # total NLL of the baseline parameter set, drawn as a dashed line
 
 p_panel1 <- plot_nll_convergence_panel(ga2, "min_LL", "minimum NLL", "#0072B2",
                                        sd_color = "#D55E00",
                                        gen_breaks = seq(0, LAST_GEN, 5), sd_max = 1.2e5,
-                                       primary_min = 6000)   # min_LL ranges ~6459-8550
+                                       primary_min = 6000,   # min_LL ranges ~6459-8550
+                                       baseline = baseline_NLL,   # dashed line; give its value in the caption
+                                       legend_position = c(0.95, 0.80))
 p_panel2 <- plot_nll_mean_median_max_panel(ga2,
                                            mean_color = "#009E73", median_color = "#6A3D9A",
-                                           max_color = "#CC79A7", gen_breaks = seq(0, LAST_GEN, 5))
+                                           max_color = "#CC79A7", gen_breaks = seq(0, LAST_GEN, 5),
+                                           baseline = baseline_NLL)
 p_nll_combined <- p_panel1 + p_panel2
 p_nll_combined
 ggsave(file.path(PLOTS, "ts/ga_convergence_nll.png"), plot = p_nll_combined,
@@ -343,6 +347,18 @@ if(EXTRA_PLOTS){
                                           max_candidates = 1000)
   rrmse_cor <- plot_rrmse_vs_fitness(rrmse_df, facet_by = "series", plots_dir = file.path(PLOTS, "ts"))
   print(rrmse_cor)
+}
+
+## ---- 7. CONTRIBUTION OF COMPONENTS (manuscript Fig. X) ------------------------------------------
+# Needs the output of "st nll partition phase6.R" and "ga_discussion_checks.R" (section 6) in plots_R/.
+# Stanza biomass series are reference series and are left out (set EXCLUDE_STANZA_BIOMASS in the script).
+fig_needs <- file.path(PLOTS, c("nll_temporal_by_series.csv", "nll_spatial_by_map.csv",
+                                "nll_partition_temporal_vs_spatial.csv",
+                                file.path("discussion_checks", "06_member_series_nll.csv")))
+if(all(file.exists(fig_needs))){
+  local(source(file.path(REPO_DIR, "fig contribution of components phase6.R"), local = TRUE))
+} else {
+  message("Skipping section 7, missing: ", paste(basename(fig_needs[!file.exists(fig_needs)]), collapse = ", "))
 }
 
 message("Done. Figures are in ", PLOTS)
