@@ -1,9 +1,9 @@
 #---------------------------------------------------------------------------------------------------------------
 # Figure: contribution of components to the fit (phase6 ga01)
-#   A  change in NLL by stanza, catch and fishing mortality (gag, red grouper)
-#   B  temporal and spatial NLL, baseline vs best  (all groups, gag, red grouper)
-#   C  change in spatial NLL for the four focal maps
-#   D  ten largest temporal series, range across the ensemble members
+#   A  change in temporal and spatial NLL, best minus baseline (all groups, gag, red grouper)
+#   B  change in NLL by stanza, catch and fishing mortality (gag, red grouper)
+#   C  ten largest temporal series, range across the ensemble members
+#   D  change in spatial NLL for the four focal maps
 #
 # The stanza biomass series (GAG_age1..6_biomass, REDGRP_age1..6_biomass) come from the stock assessments
 # and are treated as reference series. They are EXCLUDED here (EXCLUDE_STANZA_BIOMASS = TRUE).
@@ -59,20 +59,20 @@ A <- rbind(
              spatial = c(mapsum(c("red grouper 3-4", "red grouper 5+"), "baseline"),
                          mapsum(c("red grouper 3-4", "red grouper 5+"), "best"))))
 A$group <- factor(A$group, levels = c("All groups", "Gag", "Red grouper")); A$model <- factor(A$model, levels = c("Baseline", "Best"))
-Al <- rbind(data.frame(A[, c("group", "model")], part = "Temporal", value = A$temporal),
-            data.frame(A[, c("group", "model")], part = "Spatial (weighted)", value = A$spatial))
-Al$part <- factor(Al$part, levels = c("Spatial (weighted)", "Temporal"))
-Al$total <- ave(Al$value, Al$group, Al$model, FUN = sum)
-Al$pct   <- round(100 * Al$value / Al$total)
-Al$lab   <- paste0(format(round(Al$value), big.mark = ","), "\n(", Al$pct, "%)")
-pA <- ggplot(Al, aes(model, value, fill = part)) + geom_col(width = 0.7) +
-  geom_text(data = Al[Al$part == "Temporal", ], aes(y = value / 2, label = lab),
-            size = 4.6, colour = "white", lineheight = 0.9) +
-  geom_text(data = Al[Al$part != "Temporal", ], aes(y = total, label = lab),
-            size = 4.6, colour = "#8a5a00", vjust = -0.15, lineheight = 0.9) +
-  facet_wrap(~group, scales = "free_y", nrow = 1) +
-  scale_fill_manual(values = c("Temporal" = col_t, "Spatial (weighted)" = col_s), breaks = c("Temporal", "Spatial (weighted)")) +
-  scale_y_continuous(expand = expansion(mult = c(0, 0.2))) + labs(x = NULL, y = "NLL") + th
+Ad <- do.call(rbind, lapply(split(A, A$group), function(d){
+  b <- d[d$model == "Baseline", ]; e <- d[d$model == "Best", ]
+  data.frame(group = b$group, part = c("Temporal", "Spatial"),
+             delta = c(e$temporal - b$temporal, e$spatial - b$spatial),
+             pct = c(100 * (e$temporal - b$temporal) / b$temporal, 100 * (e$spatial - b$spatial) / b$spatial))}))
+Ad$part <- factor(Ad$part, levels = c("Temporal", "Spatial"))
+pc  <- ifelse(abs(Ad$pct) < 1, sprintf("%+.1f", Ad$pct), sprintf("%+.0f", Ad$pct))
+Ad$lab <- paste0(pc, "%\n(", ifelse(Ad$delta > 0, "+", "-"), formatC(abs(round(Ad$delta)), format = "d", big.mark = ","), ")")
+pA <- ggplot(Ad, aes(part, pct, fill = part)) + geom_hline(yintercept = 0) + geom_col(width = 0.65) +
+  geom_text(aes(label = lab, vjust = ifelse(pct > 0, -0.2, 1.1)), size = 4.6, lineheight = 0.9) +
+  facet_wrap(~group, nrow = 1) +
+  scale_fill_manual(values = c("Temporal" = col_t, "Spatial" = col_s)) +
+  scale_y_continuous(limits = c(-68, 22), breaks = seq(-60, 20, 20)) +
+  labs(x = NULL, y = "Change in NLL (%)") + th + theme(legend.position = "none")
 
 #---- B: change by stanza (catch and F only) ------------------------------------------------------------------
 get_d <- function(title) { v <- ser$delta[ser$Title == title]; if(length(v)) v[1] else NA_real_ }
@@ -96,31 +96,35 @@ pB <- ggplot(B, aes(stanza, delta, fill = measure)) + geom_hline(yintercept = 0)
   facet_wrap(~species, nrow = 1) +
   scale_fill_manual(values = c("Biomass" = col_b, "Catch" = col_c, "Fishing mortality" = col_f)) +
   scale_y_continuous(trans = symlog, breaks = c(-1000, -100, -10, 0, 10), labels = c("-1,000", "-100", "-10", "0", "10")) +
-  labs(x = "Stanza (age)", y = "Change in NLL") + th
+  labs(x = "Stanza (age)", y = "Change in NLL") + th +
+  theme(legend.position = c(0.53, 0.03), legend.justification = c(0, 0), legend.direction = "vertical",
+        legend.key.height = unit(1.1, "lines"), legend.background = element_blank())
 
 #---- C: focal spatial maps -----------------------------------------------------------------------------------
-C <- spm[!is.na(spm$best), ]; C$delta <- C$best - C$baseline
+C <- spm[!is.na(spm$best), ]; C$delta <- C$best - C$baseline; C$pct <- 100 * C$delta / C$baseline
 C$lab <- factor(C$map, levels = c("gag 2-4", "gag 5+", "red grouper 3-4", "red grouper 5+"),
                 labels = c("Gag\n2-4", "Gag\n5+", "Red\ngrouper\n3-4", "Red\ngrouper\n5+"))
-pC <- ggplot(C, aes(lab, delta, fill = delta < 0)) + geom_hline(yintercept = 0) + geom_col(width = 0.65) +
-  geom_text(aes(label = sprintf("%+.1f", delta), vjust = ifelse(delta > 0, -0.4, 1.4)), size = 5) +
+C$txt <- paste0(sprintf("%+.0f", C$pct), "%\n(", sprintf("%+.1f", C$delta), ")")
+pC <- ggplot(C, aes(lab, pct, fill = pct < 0)) + geom_hline(yintercept = 0) + geom_col(width = 0.65) +
+  geom_text(aes(label = txt, vjust = ifelse(pct > 0, -0.2, 1.1)), size = 4.6, lineheight = 0.9) +
   scale_fill_manual(values = c("TRUE" = "#009E73", "FALSE" = "#CC79A7"), guide = "none") +
-  scale_y_continuous(expand = expansion(mult = c(0.12, 0.12))) +
-  labs(x = NULL, y = "Change in spatial NLL") + th
+  scale_y_continuous(expand = expansion(mult = c(0.2, 0.2))) +
+  labs(x = NULL, y = "Change in spatial NLL (%)") + th
 
 #---- D: largest series across members ------------------------------------------------------------------------
-nice <- c(GAG_age6_catch = "Gag 5+ catch", GAG_age6_F = "Gag 5+ fishing mortality", GAG_age6_biomass = "Gag 5+ biomass",
-          REDGRP_age6_F = "Red grouper 5+ fishing mortality", REDGRP_age6_catch = "Red grouper 5+ catch",
-          GAG_SEDAR105_AGE0_TPR = "Gag 0 index, TPR", GAG_SEDAR105_AGE0_TBR = "Gag 0 index, TBR",
-          GAG_SEDAR105_AGE0_CHR = "Gag 0 index, CHR", GAG_SEDAR105_AGE0_FWCNMFS = "Gag 0 index, FWC-NMFS",
-          GAG_SEDAR105_AGE0_SAR = "Gag 0 index, SAR", GAG_SEDAR105_AGE0_MBB = "Gag 0 index, MBB",
-          REDGRP_SEDAR88_NMFS_BLL = "Red grouper 5+ survey (NMFS BLL)", REDGRP_SEDAR88_CmbVid = "Red grouper 5+ combined video",
-          REDGRP_SEDAR88_Rec = "Red grouper 3-4 recreational index", GAG_SEDAR72SRFS_Srv_SEAMAP_VIDEO_9 = "Gag SEAMAP video survey",
-          GAG_SEDAR72SRFS_Rec_HBT_3 = "Gag HBT recreational index", GAG_SEDAR105_GFISHER = "Gag GFISHER index")
+nice <- c(GAG_age6_catch = "Gag 5+ C", GAG_age6_F = "Gag 5+ F", GAG_age6_biomass = "Gag 5+ B",
+          REDGRP_age6_F = "Red grouper 5+ F", REDGRP_age6_catch = "Red grouper 5+ C",
+          GAG_SEDAR105_AGE0_TPR = "Gag 0 B, TPR", GAG_SEDAR105_AGE0_TBR = "Gag 0 B, TBR",
+          GAG_SEDAR105_AGE0_CHR = "Gag 0 B, CHR", GAG_SEDAR105_AGE0_FWCNMFS = "Gag 0 B, FWC-NMFS",
+          GAG_SEDAR105_AGE0_SAR = "Gag 0 B, SAR", GAG_SEDAR105_AGE0_MBB = "Gag 0 B, MBB",
+          REDGRP_SEDAR88_NMFS_BLL = "Red grouper 5+ B, BLL", REDGRP_SEDAR88_CmbVid = "Red grouper 5+ B, video",
+          REDGRP_SEDAR88_Rec = "Red grouper 3-4 B, rec.", GAG_SEDAR72SRFS_Srv_SEAMAP_VIDEO_9 = "Gag B, SEAMAP video",
+          GAG_SEDAR72SRFS_Rec_HBT_3 = "Gag B, HBT rec.", GAG_SEDAR105_GFISHER = "Gag B, GFISHER")
 mem$id <- sub("\\|.*$", "", mem$series)
 D <- mem[order(-mem$member_mean), ][seq_len(N_TOP), ]
 D$label <- ifelse(D$id %in% names(nice), nice[D$id], D$id)
-D$label <- factor(D$label, levels = rev(D$label))
+D$label <- vapply(D$label, function(x) paste(strwrap(x, width = 100), collapse = "\n"), "")
+D$label <- factor(D$label, levels = rev(unique(D$label)))
 D$best_series <- ser$best[match(D$id, ser$Title)]
 pD <- ggplot(D, aes(y = label)) +
   geom_linerange(aes(xmin = member_min, xmax = member_max, colour = "Ensemble range"), linewidth = 2.2, alpha = 0.45) +
@@ -136,16 +140,15 @@ pD <- ggplot(D, aes(y = label)) +
         legend.key.height = unit(1.1, "lines"), legend.background = element_blank())
 
 #---- combine -------------------------------------------------------------------------------------------------
-row1 <- (pB | pA) + plot_layout(widths = c(1, 1.45))
-row2 <- (pC | pD) + plot_layout(widths = c(1, 1.3))
-fig <- row1 / row2 + plot_annotation(tag_levels = "A") & theme(plot.tag = element_text(face = "bold", size = 22))
+fig <- (pA + pB + pD + pC + plot_layout(ncol = 2, widths = c(1.3, 1))) + plot_annotation(tag_levels = "A") & theme(plot.tag = element_text(face = "bold", size = 22))
 dir.create(file.path(pr, "ts"), showWarnings = FALSE, recursive = TRUE)
 tag <- if(EXCLUDE_STANZA_BIOMASS) "" else "_all58"
 ggsave(file.path(pr, "ts", paste0("Fig_contribution_of_components", tag, ".png")), fig, width = 13.5, height = 10.5, dpi = 300, bg = "white")
 ggsave(file.path(pr, "ts", paste0("Fig_contribution_of_components", tag, ".pdf")), fig, width = 13.5, height = 10.5)
 
+write.csv(Ad, file.path(pr, "ts", paste0("Fig_contribution_A_change", tag, ".csv")), row.names = FALSE)
 write.csv(A, file.path(pr, "ts", paste0("Fig_contribution_A_partition", tag, ".csv")), row.names = FALSE)
 write.csv(B, file.path(pr, "ts", paste0("Fig_contribution_B_stanza", tag, ".csv")),    row.names = FALSE)
-write.csv(C[, c("map", "baseline", "best", "delta")], file.path(pr, "ts", paste0("Fig_contribution_C_maps", tag, ".csv")), row.names = FALSE)
+write.csv(C[, c("map", "baseline", "best", "delta", "pct")], file.path(pr, "ts", paste0("Fig_contribution_C_maps", tag, ".csv")), row.names = FALSE)
 write.csv(D[, c("id", "baseline", "best_series", "member_min", "member_mean", "member_max")], file.path(pr, "ts", paste0("Fig_contribution_D_series", tag, ".csv")), row.names = FALSE)
 print(A)
