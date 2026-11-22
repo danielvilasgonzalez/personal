@@ -8,7 +8,7 @@
 #
 # The stanza biomass series (GAG_age1..6_biomass, REDGRP_age1..6_biomass) come from the stock assessments
 # and are treated as reference series. They are EXCLUDED here (EXCLUDE_STANZA_BIOMASS = TRUE).
-# Set it to FALSE to get the full 58-series objective that the GA actually minimized.
+# Set it to FALSE to get the full 58-series objective that the GA actually minimized (baseline about 11,100, best 6,459).
 #
 # Sourced from the main script (st calibration run phase6.R, section 7) or run on its own.
 # Needs only: ggplot2, patchwork (both already used by st_calibration_functions.R).
@@ -46,7 +46,7 @@ message("series used: ", nrow(ser), " | temporal NLL baseline ", round(sum(ser$b
 # ensemble mean = dark magenta, ensemble range = magenta (members), temporal NLL = dark blue (as in Fig. 2)
 col_base <- "black"; col_best <- "#20B2AA"; col_mem <- "#B5367A"; col_mean <- "#6E1F4D"
 col_t <- "#1B4F72"; col_s <- "#E69F00"; col_b <- "#56B4E9"; col_c <- "#D55E00"; col_f <- "#999999"
-th <- theme_bw(base_size = 16) +
+th <- theme_bw(base_size = 18) +
   theme(plot.title = element_text(face = "bold", size = 15), strip.background = element_blank(), panel.grid.minor = element_blank(), panel.border = element_rect(colour = "black", fill = NA, linewidth = 0.7),
         strip.text = element_text(face = "bold", hjust = 0, size = 15), axis.title = element_text(face = "bold"), legend.position = "bottom",
         legend.title = element_blank(), axis.text = element_text(colour = "black"),
@@ -120,16 +120,16 @@ A2 <- rbind(mkA("Gag", gag, c("gag 2-4", "gag 5+")), mkA("Red grouper", red, c("
 A2$part <- factor(A2$type, levels = c(ptypes, "Spatial"), labels = c("Biomass", "Catch", "F", "Spatial"))
 base_gr <- sum(A2$base)   # one common baseline for A and B: total NLL of gag + red grouper fitted data, so the bars add up to the total change
 for(v in c("best", "mean", "min", "max")) A2[[paste0(v, "_p")]] <- 100 * (A2[[v]] - A2$base) / base_gr
-A2$xa <- (as.integer(A2$part) - 1) * 3 + ifelse(A2$species == "Gag", 1, 2)
+A2$xa <- (as.integer(A2$part) - 1) * 3 + ifelse(A2$species == "Gag", 0.85, 2.15)
 write.csv(A2, file.path(pr, "ts", "Fig_contribution_A_best_ensemble.csv"), row.names = FALSE)
 pA <- ggplot(A2, aes(xa)) + geom_hline(yintercept = 0, linetype = "dashed") + geom_vline(xintercept = c(3, 6, 9), colour = "grey30") +
-  geom_point(aes(y = best_p), colour = col_best, shape = 16, size = 4.2) +
+  geom_point(aes(y = best_p), colour = col_best, shape = 16, size = 5) +
   geom_errorbar(aes(ymin = min_p, ymax = max_p), colour = "black", width = 0.3, linewidth = 0.5) +
-  annotate("text", x = (0:3) * 3 + 1.5, y = Inf, label = c("Biomass", "Catch", "F", "Spatial"), vjust = 1.4, fontface = "bold", size = 4.6) +
-  scale_x_continuous(breaks = as.vector(outer(1:2, (0:3) * 3, "+")), labels = rep(c("Gag", "Red"), 4), limits = c(0.25, 11.75), expand = c(0, 0)) +
+  annotate("text", x = (0:3) * 3 + 1.5, y = Inf, label = c("Biomass", "Catch", "F", "Spatial"), vjust = 1.4, fontface = "bold", size = 5) +
+  scale_x_continuous(breaks = as.vector(outer(c(0.85, 2.15), (0:3) * 3, "+")), labels = rep(c("Gag", "Red"), 4), limits = c(0.25, 11.75), expand = c(0, 0)) +
   scale_y_continuous(labels = function(x) paste0(x, "%"), limits = c(-45, 15), breaks = seq(-40, 10, 10), expand = c(0, 0)) +
   labs(x = NULL, y = "Change in NLL\n(% of total)") + th +
-  theme(axis.text.x = element_text(size = 12), panel.grid.major.x = element_line(colour = "grey80", linewidth = 0.4, linetype = "dashed"), legend.position = "none")
+  theme(axis.text.x = element_text(size = 13), panel.grid.major.x = element_line(colour = "grey80", linewidth = 0.4, linetype = "dashed"), legend.position = "none")
 
 #---- B: change by stanza (catch and F only) ------------------------------------------------------------------
 get_e <- function(title){ i <- which(mem_all$id == title)[1]; if(is.na(i)) return(rep(NA_real_, 3))
@@ -211,9 +211,10 @@ pD <- ggplot(D, aes(y = label)) +
 library(ranger)
 par_tab <- read.csv(file.path(RUN, "results", "parvec_ga01.csv"), check.names = FALSE); names(par_tab)[1] <- "par"
 e <- read.csv(file.path(RUN, "results", "ga_evals_ga01.csv"), check.names = FALSE)
-types <- c("Vulnerabilities", "Red tide curves", "Environmental curves", "Fleet", "Dispersal")
-ptype <- ifelse(grepl("^vul_", par_tab$par), types[1], ifelse(grepl("^rt", par_tab$par), types[2],
-         ifelse(grepl("^env", par_tab$par), types[3], ifelse(grepl("^flt_", par_tab$par), types[4], types[5])))); names(ptype) <- par_tab$par
+types <- c("Vulnerabilities", "Red tide mortality", "Red tide foraging", "Environmental curves", "Fleet", "Dispersal")
+rt_id <- suppressWarnings(as.integer(sub("^rt(\\d+)_.*", "\\1", par_tab$par)))   # red tide response ids: 39-53 mortality (M0), 54-67 foraging
+ptype <- ifelse(grepl("^vul_", par_tab$par), types[1], ifelse(grepl("^rt", par_tab$par), ifelse(rt_id <= 53, types[2], types[3]),
+         ifelse(grepl("^env", par_tab$par), types[4], ifelse(grepl("^flt_", par_tab$par), types[5], types[6])))); names(ptype) <- par_tab$par
 X <- e[, par_tab$par]; ok <- complete.cases(X) & is.finite(e$fitness); X <- X[ok, ]; y <- log10(e$fitness[ok])
 for(j in names(X)) if(min(X[[j]]) > 0 && max(X[[j]]) / min(X[[j]]) > 20) X[[j]] <- log10(X[[j]])
 grp <- ptype[colnames(X)]
@@ -239,13 +240,13 @@ G$per_par <- G$share / G$n
 P <- data.frame(par = colnames(X), type = grp, share = rowMeans(Pm), lo = q(Pm, 0.025), hi = q(Pm, 0.975), row.names = NULL)
 message("mean held-out R2 = ", round(r2, 2)); print(G)
 
-cols <- c("Vulnerabilities" = "#937860", "Red tide curves" = "#C44E52", "Environmental curves" = "#55A868", "Fleet" = "#8172B3", "Dispersal" = "#DA8BC3")   # kept apart from the series palette (blue, orange, grey, gold) and the ensemble colours
-th_p <- theme_bw(base_size = 16) + theme(strip.background = element_blank(), panel.grid.minor = element_blank(), panel.border = element_rect(colour = "black", fill = NA, linewidth = 0.7), axis.title = element_text(face = "bold"),
+cols <- c("Vulnerabilities" = "#937860", "Red tide mortality" = "#C44E52", "Red tide foraging" = "#E8A0A2", "Environmental curves" = "#55A868", "Fleet" = "#8172B3", "Dispersal" = "#DA8BC3")   # kept apart from the series palette (blue, orange, grey, gold) and the ensemble colours
+th_p <- theme_bw(base_size = 18) + theme(strip.background = element_blank(), panel.grid.minor = element_blank(), panel.border = element_rect(colour = "black", fill = NA, linewidth = 0.7), axis.title = element_text(face = "bold"),
         axis.text = element_text(colour = "black"), legend.position = "none",
         panel.grid.major.y = element_line(colour = "grey90", linewidth = 0.4), panel.grid.major.x = element_line(colour = "grey80", linewidth = 0.4, linetype = "dashed"))
 G$type <- factor(G$type, levels = rev(G$type[order(-G$share)]))
 G$lab <- paste0(sprintf("%.0f", G$share), "%")
-G$tcol <- as.character(G$type); lev <- levels(G$type); sh <- function(x) sub("Vulnerabilities", "Vuln.", sub("Environmental curves", "Env.", sub("Red tide curves", "Red tide", x)))
+G$tcol <- as.character(G$type); lev <- levels(G$type); sh <- function(x) sub("Vulnerabilities", "Vuln.", sub("Environmental curves", "Env.", sub("Red tide foraging", "RT for.", sub("Red tide mortality", "RT mort.", x))))
 G$type <- factor(sh(paste0(G$type, " (", G$n, ")")), levels = sh(paste0(lev, " (", G$n[match(lev, G$type)], ")")))
 th_dot <- theme(panel.grid.major.y = element_line(colour = "grey88", linewidth = 0.4))
 pE <- ggplot(G, aes(share, type, colour = tcol)) + geom_linerange(aes(xmin = lo, xmax = hi), linewidth = 1.3) +
@@ -327,14 +328,14 @@ make_c <- function(sp, ylab = TRUE){
   d$xp <- (match(d$kind, kinds) - 1) * 6.5 + d$stz + 1   # three blocks of equal width, equal margin each side of the six stanzas
   bs <- (0:2) * 6.5 + 1
   ggplot(d, aes(xp)) + geom_hline(yintercept = 0, linetype = "dashed") + geom_vline(xintercept = c(6.75, 13.25), colour = "grey30") +
-    geom_point(aes(y = best_p, colour = "Best model"), shape = 16, size = 3.8) +
+    geom_point(aes(y = best_p, colour = "Best model"), shape = 16, size = 4.6) +
     geom_errorbar(aes(ymin = lo_p, ymax = hi_p), colour = "black", width = 0.4, linewidth = 0.5, na.rm = TRUE) +
-    annotate("text", x = bs + 2.5, y = Inf, label = c("Biomass", "Catch", "F"), vjust = 1.4, fontface = "bold", size = 4.6) +
+    annotate("text", x = bs + 2.5, y = Inf, label = c("Biomass", "Catch", "F"), vjust = 1.4, fontface = "bold", size = 5.4) +
     ens_scale + scale_x_continuous(breaks = unlist(lapply(bs, function(st) st + 0:5)), labels = rep(c("0", "1", "2", "3", "4", "5+"), 3), limits = c(0.25, 19.75), expand = c(0, 0)) +
     scale_y_continuous(labels = function(x) paste0(x, "%"), expand = expansion(mult = c(0.05, 0.12)), limits = c(-33, 4)) +
     labs(title = sp, x = "Stanza (age)", y = "Change in NLL\n(% of total)") + th +
-    theme(plot.title = element_text(face = "bold", size = 15, hjust = 0.5), legend.position = "none", panel.grid.major.x = element_line(colour = "grey80", linewidth = 0.4, linetype = "dashed"),
-          axis.text.x = element_text(size = 10.5, colour = "black"))
+    theme(plot.title = element_text(face = "bold", size = 19, hjust = 0.5), legend.position = "none", panel.grid.major.x = element_line(colour = "grey80", linewidth = 0.4, linetype = "dashed"),
+          axis.text.x = element_text(size = 11.5, colour = "black"))
 }
 pCg <- make_c("Gag"); pCr <- make_c("Red grouper", ylab = FALSE)
 
@@ -348,26 +349,30 @@ message("gag + red grouper total NLL: baseline ", round(base_gr), ", best ", rou
 Gb <- G[order(-G$share), ]
 Gb$v <- Gb$share / 100 * tot_pct["best"]; Gb$vm <- Gb$share / 100 * tot_pct["mean"]; Gb$vlo <- Gb$share / 100 * tot_pct["lo"]; Gb$vhi <- Gb$share / 100 * tot_pct["hi"]   # total change allocated by sensitivity share
 Gb$pp <- ifelse(Gb$per_par < 0.1, sprintf("%.2f", Gb$per_par), sprintf("%.1f", Gb$per_par))   # share per parameter, so the effect of group size is visible
-Gb$lab <- sub(" \\(", "\n(", as.character(Gb$type))
+Gb$lab <- gsub("RT mort\\.", "RT\nmort.", gsub("RT for\\.", "RT\nfor.", sub(" \\(", "\n(", as.character(Gb$type))))
 Gb$xl <- factor(Gb$lab, levels = Gb$lab)
 Gb$txt <- ifelse(abs(Gb$v) < 0.5, "0%", sprintf("%.0f%%", Gb$v))   # avoids "-0%"
 write.csv(Gb[, c("type", "n", "share", "v", "vm", "vlo", "vhi")], file.path(pr, "ts", "Fig_contribution_B_allocation.csv"), row.names = FALSE)
 pEF <- ggplot(Gb, aes(xl)) + geom_hline(yintercept = 0, linetype = "dashed") +
-  geom_point(aes(y = v), colour = col_best, shape = 16, size = 4.2) +
-  geom_errorbar(aes(ymin = vlo, ymax = vhi), colour = "black", width = 0.15, linewidth = 0.5) +
-  geom_text(aes(y = vlo, label = txt), vjust = 1.8, size = 4.4, colour = "black") +
-  geom_text(aes(y = 4.3, label = paste0(pp, "%/par.")), size = 3.8, colour = "grey30") +
+  geom_point(aes(y = v), colour = col_best, shape = 16, size = 5) +
+  geom_errorbar(aes(ymin = vlo, ymax = vhi), colour = "black", width = 0.15, linewidth = 0.6) +
+  geom_text(aes(y = vlo, label = txt), vjust = 1.8, size = 6, colour = "black") +
+  geom_text(aes(y = 4.3, label = pp), size = 5.2, colour = "grey30") +
   scale_y_continuous(labels = function(x) paste0(x, "%"), limits = c(-26, 6), expand = c(0, 0), breaks = seq(-25, 0, 5)) +
-  labs(x = NULL, y = "Change in NLL\n(% of total)") + th_p + th_dot + theme(panel.grid.major.x = element_line(colour = "grey80", linewidth = 0.4, linetype = "dashed"), panel.grid.major.y = element_line(colour = "grey88", linewidth = 0.4))
+  labs(x = NULL, y = "Change in NLL\n(% of total)") + th_p + th_dot + theme(axis.text.x = element_text(size = 13, colour = "black", lineheight = 0.9), panel.grid.major.x = element_line(colour = "grey80", linewidth = 0.4, linetype = "dashed"), panel.grid.major.y = element_line(colour = "grey88", linewidth = 0.4))
+
 
 W <- function(p) p   # plain patchwork: panel areas are aligned across rows and columns
-fig <- (W(pA) + W(pEF) + W(pCg) + W(pCr) + plot_layout(design = "AB\nCD", widths = c(1, 1), heights = c(1, 1))) + plot_annotation(tag_levels = list(c("A", "B", "C", "D"))) & theme(plot.tag = element_text(face = "bold", size = 22))
+TWO_PANEL <- TRUE   # TRUE: only A and B (the stanza detail of C and D is given in the text); FALSE: four panels
+fig <- if(TWO_PANEL) (W(pA) + W(pEF) + plot_layout(design = "AB", widths = c(1, 1))) + plot_annotation(tag_levels = list(c("A", "B"))) & theme(plot.tag = element_text(face = "bold", size = 28)) else
+  (W(pA) + W(pEF) + W(pCg) + W(pCr) + plot_layout(design = "AB\nCD", widths = c(1, 1), heights = c(1, 1))) + plot_annotation(tag_levels = list(c("A", "B", "C", "D"))) & theme(plot.tag = element_text(face = "bold", size = 28))
+FIG_H <- if(TWO_PANEL) 4.9 else 8.4
 dir.create(file.path(pr, "ts"), showWarnings = FALSE, recursive = TRUE)
 tag <- if(EXCLUDE_STANZA_BIOMASS) "" else "_all58"
-ggsave(file.path(pr, "ts", paste0("Fig_contribution_of_components", tag, ".pdf")), fig, width = 11, height = 8.4, device = cairo_pdf)
+ggsave(file.path(pr, "ts", paste0("Fig_contribution_of_components", tag, ".pdf")), fig, width = 11, height = FIG_H, device = cairo_pdf)
 # PNG made from the PDF so both carry the same typography
 if(requireNamespace("pdftools", quietly = TRUE)){ pdftools::pdf_convert(file.path(pr, "ts", paste0("Fig_contribution_of_components", tag, ".pdf")), format = "png", dpi = 300, filenames = file.path(pr, "ts", paste0("Fig_contribution_of_components", tag, ".png")), verbose = FALSE)
-} else ggsave(file.path(pr, "ts", paste0("Fig_contribution_of_components", tag, ".png")), fig, width = 11, height = 8.4, dpi = 300, bg = "white")
+} else ggsave(file.path(pr, "ts", paste0("Fig_contribution_of_components", tag, ".png")), fig, width = 11, height = FIG_H, dpi = 300, bg = "white")
 
 
 write.csv(CC, file.path(pr, "ts", paste0("Fig_contribution_CD_stanza", tag, ".csv")), row.names = FALSE)
