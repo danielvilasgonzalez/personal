@@ -162,6 +162,7 @@ if (RUN_RESCORE) {
   keys <- names(sc[[1]]$series)
   S    <- t(sapply(sc, function(x) x$series[keys]))               # members x series
   Tm   <- sapply(sc, function(x) x$temporal)
+  write.csv(data.frame(member = seq_len(N_ENS), S, check.names = FALSE), file.path(out_dir, "06_member_series_matrix.csv"), row.names = FALSE)   # NLL of every series for every member (used for the stanza biomass ranges in Fig. X)
   Mp   <- t(sapply(sc, function(x) x$maps))                       # members x maps (NA where the map was not saved)
   fit  <- runs$fitness[seq_len(N_ENS)]
   spat <- fit - Tm                                                # total spatial NLL = GA fitness - temporal NLL
