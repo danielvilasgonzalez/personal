@@ -46,7 +46,7 @@ message("series used: ", nrow(ser), " | temporal NLL baseline ", round(sum(ser$b
 # ensemble mean = dark magenta, ensemble range = magenta (members), temporal NLL = dark blue (as in Fig. 2)
 col_base <- "black"; col_best <- "#20B2AA"; col_mem <- "#B5367A"; col_mean <- "#6E1F4D"
 col_t <- "#1B4F72"; col_s <- "#E69F00"; col_b <- "#56B4E9"; col_c <- "#D55E00"; col_f <- "#999999"
-th <- theme_bw(base_size = 18) +
+th <- theme_bw(base_size = 15) +
   theme(plot.title = element_text(face = "bold", size = 15), strip.background = element_blank(), panel.grid.minor = element_blank(), panel.border = element_rect(colour = "black", fill = NA, linewidth = 0.7),
         strip.text = element_text(face = "bold", hjust = 0, size = 15), axis.title = element_text(face = "bold"), legend.position = "bottom",
         legend.title = element_blank(), axis.text = element_text(colour = "black"),
@@ -123,13 +123,13 @@ for(v in c("best", "mean", "min", "max")) A2[[paste0(v, "_p")]] <- 100 * (A2[[v]
 A2$xa <- (as.integer(A2$part) - 1) * 3 + ifelse(A2$species == "Gag", 0.85, 2.15)
 write.csv(A2, file.path(pr, "ts", "Fig_contribution_A_best_ensemble.csv"), row.names = FALSE)
 pA <- ggplot(A2, aes(xa)) + geom_hline(yintercept = 0, linetype = "dashed") + geom_vline(xintercept = c(3, 6, 9), colour = "grey30") +
-  geom_point(aes(y = best_p), colour = col_best, shape = 16, size = 5) +
+  geom_point(aes(y = best_p), fill = col_best, colour = "grey15", shape = 21, size = 2.9, stroke = 0.5) +
   geom_errorbar(aes(ymin = min_p, ymax = max_p), colour = "black", width = 0.3, linewidth = 0.5) +
-  annotate("text", x = (0:3) * 3 + 1.5, y = Inf, label = c("Biomass", "Catch", "F", "Spatial"), vjust = 1.4, fontface = "bold", size = 5) +
-  scale_x_continuous(breaks = as.vector(outer(c(0.85, 2.15), (0:3) * 3, "+")), labels = rep(c("Gag", "Red"), 4), limits = c(0.25, 11.75), expand = c(0, 0)) +
+  annotate("text", x = (0:3) * 3 + 1.5, y = Inf, label = c("Biomass", "Catch", "F", "Spatial"), vjust = 1.4, fontface = "bold", size = 4.1) +
+  scale_x_continuous(breaks = as.vector(outer(c(0.85, 2.15), (0:3) * 3, "+")), labels = rep(c("Gag", "Red"), 4), limits = c(0, 12), expand = c(0, 0)) +
   scale_y_continuous(labels = function(x) paste0(x, "%"), limits = c(-45, 15), breaks = seq(-40, 10, 10), expand = c(0, 0)) +
-  labs(x = NULL, y = "Change in NLL\n(% of total)") + th +
-  theme(axis.text.x = element_text(size = 13), panel.grid.major.x = element_line(colour = "grey80", linewidth = 0.4, linetype = "dashed"), legend.position = "none")
+  labs(x = NULL, y = "Change of total NLL (%)") + th +
+  theme(plot.margin = margin(5.5, 5.5, 5.5, 5.5), axis.text.x = element_text(size = 10.7), panel.grid.major.x = element_line(colour = "grey80", linewidth = 0.4, linetype = "dashed"), legend.position = "none")
 
 #---- B: change by stanza (catch and F only) ------------------------------------------------------------------
 get_e <- function(title){ i <- which(mem_all$id == title)[1]; if(is.na(i)) return(rep(NA_real_, 3))
@@ -194,8 +194,8 @@ D$best_series <- ser$best[match(D$id, ser$Title)]
 pD <- ggplot(D, aes(y = label)) +
   geom_linerange(aes(xmin = member_min, xmax = member_max, colour = "Ensemble range"), linewidth = 2.2, alpha = 0.45) +
   geom_point(aes(x = member_mean, colour = "Ensemble mean"), size = 3) +
-  geom_point(aes(x = best_series, colour = "Best model"), shape = 16, size = 5) +
-  geom_point(aes(x = baseline, colour = "Baseline model"), shape = 16, size = 5) +
+  geom_point(aes(x = best_series, colour = "Best model"), shape = 16, size = 3.5) +
+  geom_point(aes(x = baseline, colour = "Baseline model"), shape = 16, size = 3.5) +
   scale_colour_manual(values = c("Ensemble range" = col_mem, "Ensemble mean" = col_mean, "Best model" = col_best, "Baseline model" = col_base),
                       breaks = c("Baseline model", "Best model", "Ensemble mean", "Ensemble range"),
                       guide = guide_legend(nrow = 2, byrow = TRUE, override.aes = list(linetype = c(0, 0, 0, 1), shape = c(18, 18, 16, NA),
@@ -241,7 +241,7 @@ P <- data.frame(par = colnames(X), type = grp, share = rowMeans(Pm), lo = q(Pm, 
 message("mean held-out R2 = ", round(r2, 2)); print(G)
 
 cols <- c("Vulnerabilities" = "#937860", "Red tide mortality" = "#C44E52", "Red tide foraging" = "#E8A0A2", "Environmental curves" = "#55A868", "Fleet" = "#8172B3", "Dispersal" = "#DA8BC3")   # kept apart from the series palette (blue, orange, grey, gold) and the ensemble colours
-th_p <- theme_bw(base_size = 18) + theme(strip.background = element_blank(), panel.grid.minor = element_blank(), panel.border = element_rect(colour = "black", fill = NA, linewidth = 0.7), axis.title = element_text(face = "bold"),
+th_p <- theme_bw(base_size = 15) + theme(strip.background = element_blank(), panel.grid.minor = element_blank(), panel.border = element_rect(colour = "black", fill = NA, linewidth = 0.7), axis.title = element_text(face = "bold"),
         axis.text = element_text(colour = "black"), legend.position = "none",
         panel.grid.major.y = element_line(colour = "grey90", linewidth = 0.4), panel.grid.major.x = element_line(colour = "grey80", linewidth = 0.4, linetype = "dashed"))
 G$type <- factor(G$type, levels = rev(G$type[order(-G$share)]))
@@ -333,7 +333,7 @@ make_c <- function(sp, ylab = TRUE){
     annotate("text", x = bs + 2.5, y = Inf, label = c("Biomass", "Catch", "F"), vjust = 1.4, fontface = "bold", size = 5.4) +
     ens_scale + scale_x_continuous(breaks = unlist(lapply(bs, function(st) st + 0:5)), labels = rep(c("0", "1", "2", "3", "4", "5+"), 3), limits = c(0.25, 19.75), expand = c(0, 0)) +
     scale_y_continuous(labels = function(x) paste0(x, "%"), expand = expansion(mult = c(0.05, 0.12)), limits = c(-33, 4)) +
-    labs(title = sp, x = "Stanza (age)", y = "Change in NLL\n(% of total)") + th +
+    labs(title = sp, x = "Stanza (age)", y = "Change of total NLL (%)") + th +
     theme(plot.title = element_text(face = "bold", size = 19, hjust = 0.5), legend.position = "none", panel.grid.major.x = element_line(colour = "grey80", linewidth = 0.4, linetype = "dashed"),
           axis.text.x = element_text(size = 11.5, colour = "black"))
 }
@@ -347,32 +347,43 @@ tot_pct <- 100 * c(best = best_gr, mean = mean(mem_gr), lo = min(mem_gr), hi = m
 tot_pct <- 100 * (c(best = best_gr, mean = mean(mem_gr), lo = min(mem_gr), hi = max(mem_gr)) - base_gr) / base_gr
 message("gag + red grouper total NLL: baseline ", round(base_gr), ", best ", round(best_gr), " (", round(tot_pct["best"], 1), "%), ensemble mean ", round(tot_pct["mean"], 1), "%, range ", round(tot_pct["lo"], 1), " to ", round(tot_pct["hi"], 1), "%")
 Gb <- G[order(-G$share), ]
-Gb$v <- Gb$share / 100 * tot_pct["best"]; Gb$vm <- Gb$share / 100 * tot_pct["mean"]; Gb$vlo <- Gb$share / 100 * tot_pct["lo"]; Gb$vhi <- Gb$share / 100 * tot_pct["hi"]   # total change allocated by sensitivity share
+Gb$v <- Gb$share / 100 * tot_pct["best"]; Gb$vm <- Gb$share / 100 * tot_pct["mean"]; Gb$vlo <- Gb$hi / 100 * tot_pct["best"]; Gb$vhi <- Gb$lo / 100 * tot_pct["best"]   # bar = 95% interval of the share over the repeated forests   # total change allocated by sensitivity share
+# parameters at a search bound: median position of the 37 ensemble members in the outer 5% of the range (log scale when the range spans more than a factor of 20)
+pop_f <- read.csv(file.path(RUN, "results", "final_ga_popga01.csv"), check.names = FALSE); runs_f <- read.csv(file.path(RUN, "results", "final_ga_runs_ga01.csv"))
+Xb <- as.matrix(pop_f[runs_f$gapop_row[order(runs_f$fitness)][1:37], par_tab$par]); Lb <- par_tab$L.bounds; Ub <- par_tab$U.bounds; lgb <- Ub / Lb > 20
+posb <- sapply(seq_along(par_tab$par), function(j) if(lgb[j]) (log(Xb[, j]) - log(Lb[j])) / (log(Ub[j]) - log(Lb[j])) else (Xb[, j] - Lb[j]) / (Ub[j] - Lb[j]))
+medb <- apply(posb, 2, median); edge_b <- tapply(medb < 0.05 | medb > 0.95, ptype[par_tab$par], sum)
+Gb$tname <- sub(" \\(.*$", "", as.character(Gb$type)); Gb$edge <- as.numeric(edge_b[types][match(Gb$tname, sh(types))])
+Gb$bnd <- paste0(Gb$edge, "/", Gb$n)
 Gb$pp <- ifelse(Gb$per_par < 0.1, sprintf("%.2f", Gb$per_par), sprintf("%.1f", Gb$per_par))   # share per parameter, so the effect of group size is visible
-Gb$lab <- gsub("RT mort\\.", "RT\nmort.", gsub("RT for\\.", "RT\nfor.", sub(" \\(", "\n(", as.character(Gb$type))))
+Gb$lab <- gsub("RT mort\\.", "RT\nmort.", gsub("RT for\\.", "RT\nfor.", sub(" \\(.*$", "", as.character(Gb$type))))
+Gb$lab <- ifelse(grepl("\n", Gb$lab), Gb$lab, paste0(Gb$lab, "\n "))   # every name on two lines, so the counts below line up
 Gb$xl <- factor(Gb$lab, levels = Gb$lab)
+cw <- function(z) 0.105 * nchar(gsub("[()]", "", z)) + 0.07 * 2 * grepl("\\(", z)
+Gb$we <- 0.2 * nchar(as.character(Gb$edge)); Gb$wn <- 0.12 + 0.19 * nchar(as.character(Gb$n))
+Gb$xe <- seq_len(nrow(Gb)) - (Gb$we + Gb$wn) / 2; Gb$xn <- Gb$xe + Gb$we
 Gb$txt <- ifelse(abs(Gb$v) < 0.5, "0%", sprintf("%.0f%%", Gb$v))   # avoids "-0%"
 write.csv(Gb[, c("type", "n", "share", "v", "vm", "vlo", "vhi")], file.path(pr, "ts", "Fig_contribution_B_allocation.csv"), row.names = FALSE)
 pEF <- ggplot(Gb, aes(xl)) + geom_hline(yintercept = 0, linetype = "dashed") +
-  geom_point(aes(y = v), colour = col_best, shape = 16, size = 5) +
+  geom_point(aes(y = v), fill = col_best, colour = "grey15", shape = 21, size = 2.9, stroke = 0.5) +
   geom_errorbar(aes(ymin = vlo, ymax = vhi), colour = "black", width = 0.15, linewidth = 0.6) +
-  geom_text(aes(y = vlo, label = txt), vjust = 1.8, size = 6, colour = "black") +
-  geom_text(aes(y = 4.3, label = pp), size = 5.2, colour = "grey30") +
-  scale_y_continuous(labels = function(x) paste0(x, "%"), limits = c(-26, 6), expand = c(0, 0), breaks = seq(-25, 0, 5)) +
-  labs(x = NULL, y = "Change in NLL\n(% of total)") + th_p + th_dot + theme(axis.text.x = element_text(size = 13, colour = "black", lineheight = 0.9), panel.grid.major.x = element_line(colour = "grey80", linewidth = 0.4, linetype = "dashed"), panel.grid.major.y = element_line(colour = "grey88", linewidth = 0.4))
+  geom_text(aes(x = xe, y = 5.4, label = edge), hjust = 0, size = 4.3, colour = "#C0392B", fontface = "bold") +
+  geom_text(aes(x = xn, y = 5.4, label = paste0("/", n)), hjust = 0, size = 4.3, colour = "black") +
+  scale_y_continuous(labels = function(x) paste0(x, "%"), breaks = seq(-25, 0, 5), expand = c(0, 0)) + scale_x_discrete(expand = expansion(add = 0.6)) + coord_cartesian(ylim = c(-26, 7), clip = "off") +
+  labs(x = NULL, y = "Change of total NLL (%)") + th_p + th_dot + theme(plot.margin = margin(5.5, 5.5, 5.5, 5.5), axis.text.x = element_text(size = 10.7, colour = "black", lineheight = 0.9), panel.grid.major.x = element_line(colour = "grey80", linewidth = 0.4, linetype = "dashed"), panel.grid.major.y = element_line(colour = "grey88", linewidth = 0.4))
 
 
 W <- function(p) p   # plain patchwork: panel areas are aligned across rows and columns
 TWO_PANEL <- TRUE   # TRUE: only A and B (the stanza detail of C and D is given in the text); FALSE: four panels
-fig <- if(TWO_PANEL) (W(pA) + W(pEF) + plot_layout(design = "AB", widths = c(1, 1))) + plot_annotation(tag_levels = list(c("A", "B"))) & theme(plot.tag = element_text(face = "bold", size = 28)) else
+fig <- if(TWO_PANEL) (W(pA) + W(pEF) + plot_layout(design = "AB", widths = c(1, 1))) + plot_annotation(tag_levels = list(c("A", "B"))) & theme(plot.tag = element_text(face = "bold", size = 23)) else
   (W(pA) + W(pEF) + W(pCg) + W(pCr) + plot_layout(design = "AB\nCD", widths = c(1, 1), heights = c(1, 1))) + plot_annotation(tag_levels = list(c("A", "B", "C", "D"))) & theme(plot.tag = element_text(face = "bold", size = 28))
-FIG_H <- if(TWO_PANEL) 4.9 else 8.4
+FIG_H <- if(TWO_PANEL) 3.8 else 8.4
 dir.create(file.path(pr, "ts"), showWarnings = FALSE, recursive = TRUE)
 tag <- if(EXCLUDE_STANZA_BIOMASS) "" else "_all58"
-ggsave(file.path(pr, "ts", paste0("Fig_contribution_of_components", tag, ".pdf")), fig, width = 11, height = FIG_H, device = cairo_pdf)
+ggsave(file.path(pr, "ts", paste0("Fig_contribution_of_components", tag, ".pdf")), fig, width = 9, height = FIG_H, device = cairo_pdf)
 # PNG made from the PDF so both carry the same typography
 if(requireNamespace("pdftools", quietly = TRUE)){ pdftools::pdf_convert(file.path(pr, "ts", paste0("Fig_contribution_of_components", tag, ".pdf")), format = "png", dpi = 300, filenames = file.path(pr, "ts", paste0("Fig_contribution_of_components", tag, ".png")), verbose = FALSE)
-} else ggsave(file.path(pr, "ts", paste0("Fig_contribution_of_components", tag, ".png")), fig, width = 11, height = FIG_H, dpi = 300, bg = "white")
+} else ggsave(file.path(pr, "ts", paste0("Fig_contribution_of_components", tag, ".png")), fig, width = 9, height = FIG_H, dpi = 300, bg = "white")
 
 
 write.csv(CC, file.path(pr, "ts", paste0("Fig_contribution_CD_stanza", tag, ".csv")), row.names = FALSE)
