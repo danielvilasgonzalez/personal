@@ -119,14 +119,14 @@ n_pan <- function(x, default) if(is.data.frame(x) && nrow(x) > 0) nrow(x) else d
 vul_summary2 <- plot_ga_final_pop_distributions(
   gapop_final = gapop_final, gapop_init = gapop_init, ga_runs = ga_runs,
   catalog = catalog, group_names = group_names, species_patterns = "gag", parvec = PARVEC,
-  types = "vul", facet_ncol = 6, base_size = 9, max_title_chars = 7, title_style = "names", title_scale = 0.75, line_scale = 0.5, panel_aspect = 1, x_axis_all = TRUE,
+  types = "vul", facet_ncol = 5, base_size = 12, max_title_chars = 7, title_style = "names", title_scale = 0.76, line_scale = 0.5, x_axis_all = TRUE,
   save_plot = FALSE, plots_dir = file.path(PLOTS, "ts"),
   width = 6 * 3.2, height = ceiling(34 / 6) * 3.2)
 n_vul <- n_pan(vul_summary2, 34)
 envrt_summary2 <- plot_ga_final_pop_distributions(
   gapop_final = gapop_final, gapop_init = gapop_init, ga_runs = ga_runs,
   catalog = catalog, group_names = group_names, species_patterns = "gag", parvec = PARVEC,
-  types = c("env", "redtide", "disp"), facet_ncol = 6, base_size = 9, max_title_chars = 7, title_scale = 0.75, line_scale = 0.5, panel_aspect = 1, x_axis_all = TRUE,
+  types = c("env", "redtide", "disp"), facet_ncol = 5, base_size = 12, max_title_chars = 7, title_scale = 0.76, line_scale = 0.5, x_axis_all = TRUE,
   save_plot = FALSE, plots_dir = file.path(PLOTS, "ts"),
   width = 6 * 3.2, height = ceiling(20 / 6) * 3.2)
 n_env <- n_pan(envrt_summary2, 20)
@@ -134,7 +134,7 @@ message("gag panels: ", n_vul, " vulnerability, ", n_env, " env/red tide/dispers
 
 # ONE grid for all panels (vulnerabilities, then responses), so every panel has the same size.
 # The vulnerability block is padded to full rows before the response panels start.
-pad_to_row <- function(pl, ncol = 6) c(pl, rep(list(patchwork::plot_spacer()), (-length(pl)) %% ncol))
+pad_to_row <- function(pl, ncol = 5) c(pl, rep(list(patchwork::plot_spacer()), (-length(pl)) %% ncol))
 # key to the lines/bars, placed in the first empty cell of the last row
 key_df <- data.frame(
   y = 4:1,
@@ -144,17 +144,17 @@ key_df <- data.frame(
   lw  = c(2.2, 0.7, 0.7, 0.7), stringsAsFactors = FALSE)
 legend_panel <- ggplot2::ggplot(key_df) +
   ggplot2::geom_segment(ggplot2::aes(x = 0.0, xend = 0.2, y = y, yend = y, colour = col, linetype = lt, linewidth = lw)) +
-  ggplot2::geom_text(ggplot2::aes(x = 0.25, y = y, label = lab), hjust = 0, size = 2.2) +
+  ggplot2::geom_text(ggplot2::aes(x = 0.25, y = y, label = lab), hjust = 0, size = 3.6) +
   ggplot2::scale_colour_identity() + ggplot2::scale_linetype_identity() + ggplot2::scale_linewidth_identity() +
-  ggplot2::scale_x_continuous(limits = c(-0.14, 1.08), expand = c(0, 0)) + ggplot2::scale_y_continuous(limits = c(0.4, 4.6), expand = c(0, 0)) +
-  ggplot2::coord_cartesian(clip = "off") + ggplot2::theme_void() + ggplot2::theme(aspect.ratio = 1)
+  ggplot2::scale_x_continuous(limits = c(-0.14, 1.8), expand = c(0, 0)) + ggplot2::scale_y_continuous(limits = c(0.4, 4.6), expand = c(0, 0)) +
+  ggplot2::coord_cartesian(clip = "off") + ggplot2::theme_void()
 all_panels <- c(pad_to_row(attr(vul_summary2, "panels")), pad_to_row(attr(envrt_summary2, "panels")))
 first_empty <- length(pad_to_row(attr(vul_summary2, "panels"))) + length(attr(envrt_summary2, "panels")) + 1
 if(first_empty <= length(all_panels)) all_panels[[first_empty]] <- legend_panel
-combined_opt2 <- patchwork::wrap_plots(all_panels, ncol = 6, byrow = TRUE)
+combined_opt2 <- patchwork::wrap_plots(all_panels, ncol = 5, byrow = TRUE)
+# 5 columns, 7 in wide (full page width): axis text ~9 pt, panel titles ~9 pt, key ~10 pt at print size
 ggplot2::ggsave(file.path(PLOTS, "ts/ga_final_pop_distributions_gag_opt2_stacked.png"),
-                plot = combined_opt2, width = 7,    # printed size: titles ~9 pt, axis text ~7 pt (was 16 in wide, shrunk in Word)
-                height = (ceiling(length(attr(vul_summary2, "panels")) / 6) + ceiling(length(attr(envrt_summary2, "panels")) / 6)) * 1.45 + 0.1, dpi = 300, units = "in")
+                plot = combined_opt2, width = 7, height = 9.6, dpi = 300, units = "in")
 
 ## ---- 3b. ALL tested parameters (calibrated + not calibrated) for gag and for red grouper -------
 # Same layout as the figure above. Parameters that were tested in the sensitivity analysis but not
