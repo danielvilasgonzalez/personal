@@ -1,31 +1,98 @@
-# ga_discussion_checks.R   (v3)
-# Checks for the Discussion of phase6 ga01. Runs on the Mac. Nothing here starts an Ecospace run.
-# Sections 1-4 are base R and run in seconds. Sections 5-8 re-score the saved Ecospace outputs
-# with R4EwE (same set-up as 'st nll partition phase6.R') and take a few minutes.
-# Replicates of the finalists need Ecospace and are in 'ga finalist replicates WFS MICE.R' (Windows);
-# section 9 summarizes that file once it exists.
+#%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+# st results phase6.R -- numbers behind the Results and Discussion of phase6 / ga01 (one script, runs on the Mac).
+# Nothing here starts an Ecospace run. Sections that re-score saved Ecospace outputs use R4EwE (a few minutes).
+# Writes csv tables only; the figures are made by 'st calibration run phase6.R' and 'fig contribution and parameters phase6.R'.
 #
-# What each section settles in the Discussion:
-#  1 bounds of the calibrated values, with the name of each curve   -> exact wording of the bounds sentence
-#  2 ensemble spread and values at a bound                           -> 29 / 7 / 8 and the red tide hits
-#  3 groups in the temporal objective                                -> "other groups" bracket
-#  4 best parameter set each time the best changed                   -> how much the best set moved
-#  5 source of the dispersal baseline and the lineage of the members -> 50.4 km/yr bracket, elites by generation
-#  6 re-scored ensemble members: NLL by series                       -> "members miss the same features"
-#  7 entropy of observed maps and divergence                         -> spatial bracket (cross-entropy vs divergence)
-#  8 residual autocorrelation (Moran's I) and distribution metrics   -> spatial independence bracket
-#  9 replicates of the finalists (needs Windows)                    -> optional once section 10 is done
-# 10 noise from parameter sets evaluated twice in the GA            -> noise bracket and the 32-unit tolerance (no new runs)
+#  1  NLL partition: baseline and best model split into temporal / spatial, by group, by series and by map
+#       -> plots_R/nll_partition_temporal_vs_spatial.csv, nll_temporal_by_group.csv, nll_temporal_by_series.csv, nll_spatial_by_map.csv
+#          (the temporal series table is read by section 2 and by the contribution figure)
+#  2  checks for the Discussion, base R only (seconds) -> plots_R/discussion_checks/
+#       2.1 bounds of the calibrated values, with the name of each curve
+#       2.2 ensemble spread and values at a bound
+#       2.3 groups in the temporal objective
+#       2.4 best parameter set each time the best changed
+#       2.5 source of the dispersal baseline and lineage of the members
+#  3  re-scoring of the ensemble members (set RUN_RESCORE <- FALSE to skip)
+#       3.1 members: NLL by series, do they miss the same features?  (06_member_series_*.csv, used by the contribution figure)
+#       3.2 optional: all 370 candidates of the final population (SCORE_FINAL_POP)
+#       3.3 entropy of the observed maps and divergence
+#       3.4 residual autocorrelation (Moran's I) and distribution metrics
+#       3.5 RRMSE of the 12 stanza biomass series (baseline, best, members) -> plots_R/ts/Reference_stanza_biomass_rrmse.csv
+#  4  run-to-run noise from parameter sets that the GA evaluated twice (no new runs)
+#  5  replicates of the finalists vs the stop tolerance (needs sens1/finalist_replicates.csv from 'ga post-run checks WFS MICE.R')
+# The GA keeps only the gag and red grouper maps in the candidate folders (compact output), so the spatial NLL of the best
+# model can be split by map only for those; its total spatial NLL = GA fitness minus its temporal NLL.
+#%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-run_dir <- "/Users/daniel/Work/ST_calibration/phase6_ga01"
-tag     <- "ga01"
-res_dir <- file.path(run_dir, "results")
-out_dir <- file.path(run_dir, "plots_R", "discussion_checks")
-dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
-tol     <- 32.2973                                  # stop tolerance, ga_stop_ga01.csv
+#USER INPUT------------------------------------------------------------------------------------
+RUN      <- "/Users/daniel/Work/ST_calibration/phase6_ga01"
+LABEL    <- "ga01"
+REPO_DIR <- "/Users/daniel/Documents/GitHub/personal/EwE_ST_calibration"
+R4_DIR   <- "/Users/daniel/Documents/GitHub/R4EwE"                 # R4EwE source (or install the package)
+SDM_DIR  <- "/Users/daniel/Documents/GitHub/GFISHER/output/maps/GFISHER/5min/maxn_sdmTMB/mice"   # sdmTMB maps used by the GA
 SPATIAL_WEIGHT <- 15
-N_ENS   <- 37                                       # 10% of 370
+N_ENS    <- 37                                       # ensemble = best 10% of the 370 candidates
+tol      <- 32.2973                                  # stop tolerance, ga_stop_ga01.csv
+RUN_RESCORE <- TRUE                                  # sections 3.x re-score saved outputs; FALSE keeps only the base R sections
+run_dir <- RUN; tag <- LABEL; res_dir <- file.path(RUN, "results")
+out_dir <- file.path(RUN, "plots_R", "discussion_checks"); dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
 
+#SET-UP (R4EwE, observed series, maps)---------------------------------------------------------
+options(warn = 1)
+if (requireNamespace("R4EwE", quietly = TRUE)) { suppressMessages(library(R4EwE)) } else {
+  system.file <- function(..., package = "") if (package == "R4EwE") file.path(R4_DIR, "inst", ...) else base::system.file(..., package = package)
+  for (f in c("globals.R", "utils.R", "input_output.R", "Ecospace_objective_functions.R", "Spatial_likelihood.R", "fn.ecospace_gif.R"))    suppressMessages(source(file.path(R4_DIR, "R", f)))
+}
+inp <- file.path(RUN, "inputs")
+vuls <- read.csv(file.path(inp, "WFS-MICE EwE 2.13 v67020-Vulnerabilities.csv"), row.names = 1)
+group.names <- gsub(" ", "_", vuls[, 1])
+fleet.names <- trimws(gsub("(t/km^2/year)", "", as.character(read.csv(file.path(inp, "WFS-MICE EwE 2.13 v67020-Catch.csv"),
+                       header = FALSE, nrows = 1)[, -c(1:2)]), fixed = TRUE)); fleet.names <- fleet.names[seq_len(length(fleet.names) - 1)]
+obs.ts <- fn.read_ecosim_timeseries(file.path(inp, "ts_mice_v5_discards_ecospace_regions_sedar105.csv"))
+ri <- read.csv(file.path(RUN, "run_info.csv")); g <- function(k) ri$value[ri$field == k]
+rel <- as.numeric(strsplit(g("setting.relative.types"), " ")[[1]])
+obs.ts$ts.head$Absolute[obs.ts$ts.head$Type %in% rel] <- FALSE
+sg <- as.numeric(strsplit(g("setting.stanza.groups"), " ")[[1]]); ld <- as.numeric(strsplit(g("setting.lead.stanza"), " ")[[1]])
+obs.ts$ts.head$Absolute[obs.ts$ts.head$Type == 104 & obs.ts$ts.head$Poolcode %in% setdiff(sg, ld)] <- FALSE
+region.areas <- fn.read_region_areas(file.path(REPO_DIR, "combined_regions_5min_attributes.csv"))
+
+maps <- strsplit(g("setting.spatial.maps"), " ")[[1]]
+so <- fn.load_gfisher_sdmTMB(sdm_dir = SDM_DIR, maps = maps, styear = as.numeric(g("setting.spatial.styear")),
+                             endyear = as.numeric(g("setting.spatial.endyear")), cv.weight = identical(g("setting.spatial.cv.weight"), "TRUE"))
+
+# ---- 1. NLL PARTITION ----------------------------------------------------------------------------
+runs <- read.csv(file.path(RUN, "results", paste0("final_ga_runs_", LABEL, ".csv")))
+bi <- which.min(runs$fitness); fit_best <- runs$fitness[bi]
+bdir <- list.files(file.path(RUN, "output/gen30_small"), pattern = sub("^(run_g[0-9]+_i[0-9]+).*", "\\1", basename(dirname(gsub("\\\\", "/", runs$cmd_file[bi])))), full.names = TRUE)[1]
+dirs <- c(baseline = file.path(RUN, "output/run_base"), best = bdir)
+message("best candidate folder: ", bdir, " (fitness ", fit_best, ")")
+
+tmp <- lapply(dirs, function(d) fn.ecospace_objfxn(dir.pred = d, obs.ts = obs.ts, group.names = group.names, fleet.names = fleet.names,
+                fit.abs.catch = TRUE, spatial.obs = NULL, spatial.weight = SPATIAL_WEIGHT, region.areas = region.areas, return = "both"))
+sp  <- lapply(dirs, function(d) suppressWarnings(fn.spatial_LL(dir.pred = d, spatial.obs = so, spatial.weight = SPATIAL_WEIGHT,
+                group.names = group.names, model_styear = 1985)))
+
+out <- file.path(RUN, "plots_R"); dir.create(out, showWarnings = FALSE, recursive = TRUE)
+temporal <- sapply(tmp, function(r) unname(r$LL["LL.total"]))
+spatial  <- c(baseline = sp$baseline$total, best = fit_best - temporal[["best"]])   # best: only some maps are saved
+tot <- temporal + spatial
+write.csv(data.frame(model = names(dirs), temporal_NLL = round(temporal, 1), spatial_NLL = round(spatial, 1), total_NLL = round(tot, 1),
+                     pct_temporal = round(100 * temporal / tot, 1), pct_spatial = round(100 * spatial / tot, 1)),
+          file.path(out, "nll_partition_temporal_vs_spatial.csv"), row.names = FALSE)
+
+grp <- do.call(cbind, lapply(tmp, function(r) round(r$LL[names(r$LL) != "LL.total"], 2)))
+write.csv(data.frame(group = sub("^LL\\.", "", rownames(grp)), grp, pct_of_temporal_best = round(100 * grp[, "best"] / temporal[["best"]], 1)),
+          file.path(out, "nll_temporal_by_group.csv"), row.names = FALSE)
+ser <- do.call(rbind, lapply(names(tmp), function(n) { d <- tmp[[n]]$detail; d <- d[is.finite(d$loglik), c("Title", "Poolcode", "Type.name", "Region", "n", "loglik")]
+                                                        d$model <- n; d }))
+ser <- reshape(ser, idvar = c("Title", "Poolcode", "Type.name", "Region", "n"), timevar = "model", direction = "wide")
+ser <- ser[order(-ser$loglik.best), ]; ser$pct_of_temporal_best <- round(100 * ser$loglik.best / temporal[["best"]], 1)
+write.csv(ser, file.path(out, "nll_temporal_by_series.csv"), row.names = FALSE)
+mp <- data.frame(map = names(sp$baseline$per_species), baseline = round(sp$baseline$per_species, 2), best = round(sp$best$per_species, 2))
+write.csv(mp, file.path(out, "nll_spatial_by_map.csv"), row.names = FALSE)
+print(read.csv(file.path(out, "nll_partition_temporal_vs_spatial.csv"))); print(mp)
+
+# ---- 2. CHECKS FOR THE DISCUSSION (base R) ----------------------------------------------------------
 # ---- load ---------------------------------------------------------------------------------
 pv   <- read.csv(file.path(res_dir, paste0("parvec_", tag, ".csv")), row.names = 1, check.names = FALSE)
 pop  <- read.csv(file.path(res_dir, paste0("final_ga_pop", tag, ".csv")), row.names = 1, check.names = FALSE)
@@ -50,7 +117,7 @@ curve_name <- function(id) {                     # name of the response function
   ifelse(is.na(n), NA, envp[["Function name"]][match(n, envp$fxn_num)])
 }
 
-# ---- 1. bounds of the calibrated values ----------------------------------------------------
+# ---- 2.1 bounds of the calibrated values ----------------------------------------------------
 # Resolves the exact wording of the bounds sentence: ratios of the bounds to the baseline, by value.
 b <- data.frame(id = ids, what = curve_name(ids), L = pv[ids, "L"], base = pv[ids, "base"], U = pv[ids, "U"])
 b$L_x <- round(b$L / b$base, 2); b$U_x <- round(b$U / b$base, 2)
@@ -62,7 +129,7 @@ cat("\nCalibrated vulnerabilities: lower bound", paste(unique(b$L[b$kind == "vul
 cat("Dispersal (km/yr): baseline, lower, upper\n"); print(pv[grepl("^disp", rownames(pv)), c("base", "L", "U")])
 write.csv(b, file.path(out_dir, "01_bounds_of_calibrated_values.csv"), row.names = FALSE)
 
-# ---- 2. ensemble spread and values at a bound ------------------------------------------------
+# ---- 2.2 ensemble spread and values at a bound ------------------------------------------------
 cat("\nEnsemble members:", nrow(E), "| elites among them:", sum(runs$role[seq_len(nrow(E))] == "elite"),
     "| distinct parameter vectors:", nrow(unique(E)),
     "| NLL span:", round(diff(range(runs$fitness[seq_len(nrow(E))])), 1), "\n")
@@ -82,11 +149,11 @@ cat("Of", length(ids), "calibrated values: span > half of range:", sum(rf > 0.5)
 print(hit[hit$at_lower >= 0.5 | hit$at_upper >= 0.5, ])
 write.csv(hit, file.path(out_dir, "02_ensemble_spread_and_bounds.csv"), row.names = FALSE)
 
-# ---- 3. which groups entered the temporal objective -------------------------------------------
+# ---- 2.3 which groups entered the temporal objective -------------------------------------------
 ts$group <- sub("_.*$", "", ts$Title)
 print(table(ts$group, ts[["Type.name"]]))        # GAG, REDGRP, and 3 relative-catch series of other groups
 
-# ---- 4. best parameter set each time the best NLL changed -----------------------------------------
+# ---- 2.4 best parameter set each time the best NLL changed -----------------------------------------
 ln  <- readLines(file.path(res_dir, paste0("ga_results_", tag, ".csv")), warn = FALSE)
 gar <- read.csv(text = ln[grep('^"?gen"?,', ln)[1]:length(ln)], check.names = FALSE)
 changed <- c(TRUE, diff(gar$min_LL[gar$gen >= 0]) < 0)
@@ -99,7 +166,7 @@ cat("\nGenerations where the best NLL changed:", paste(bestgen$gen, collapse = "
     round(min(late$min_LL)), "): of", length(vcols), "vulnerabilities,", sum(ratio > 10), "differ > 10-fold and",
     sum(ratio > 100), "> 100-fold between candidates.\n")
 
-# ---- 5. dispersal baseline and lineage of the members ------------------------------------------------
+# ---- 2.5 dispersal baseline and lineage of the members ------------------------------------------------
 cat("\nDispersal baseline in the input file (", "WFS-MICE ... -Dispersal.csv", "):\n", sep = "")
 print(disp[, c(2, 3)][disp[[3]] %in% unique(pv[grepl("^disp", rownames(pv)), "base"]) |
                        grepl("^(gag|red grouper)", disp[[2]]), ])
@@ -109,36 +176,9 @@ gen_of <- as.integer(sub(".*run_g([0-9]+)_.*", "\\1", gsub("\\\\", "/", runs$cmd
 cat("\nGeneration of origin of the", N_ENS, "ensemble members (elites carry the generation where they first appeared):\n")
 print(table(role = runs$role[seq_len(N_ENS)], generation = gen_of[seq_len(N_ENS)]))
 
-# ---------------------------------------------------------------------------------------------------
-# Sections 6-8 re-score saved Ecospace outputs (no Windows needed). Set to FALSE to skip.
-RUN_RESCORE <- TRUE
-# ---------------------------------------------------------------------------------------------------
+# ---- 3. RE-SCORING OF SAVED OUTPUTS ------------------------------------------------------------------
 if (RUN_RESCORE) {
-  REPO_DIR <- "/Users/daniel/Documents/GitHub/personal/EwE_ST_calibration"
-  R4_DIR   <- "/Users/daniel/Documents/GitHub/R4EwE"
-  SDM_DIR  <- "/Users/daniel/Documents/GitHub/GFISHER/output/maps/GFISHER/5min/maxn_sdmTMB/mice"
-  options(warn = 1)
-  if (requireNamespace("R4EwE", quietly = TRUE)) { suppressMessages(library(R4EwE)) } else {
-    system.file <- function(..., package = "") if (package == "R4EwE") file.path(R4_DIR, "inst", ...) else base::system.file(..., package = package)
-    for (f in c("globals.R", "utils.R", "input_output.R", "Ecospace_objective_functions.R", "Spatial_likelihood.R"))
-      suppressMessages(source(file.path(R4_DIR, "R", f)))
-  }
   r4 <- function(nm) if (requireNamespace("R4EwE", quietly = TRUE)) get(nm, envir = asNamespace("R4EwE")) else get(nm)
-  inp  <- file.path(run_dir, "inputs")
-  vuls <- read.csv(file.path(inp, "WFS-MICE EwE 2.13 v67020-Vulnerabilities.csv"), row.names = 1)
-  group.names <- gsub(" ", "_", vuls[, 1])
-  fleet.names <- trimws(gsub("(t/km^2/year)", "", as.character(read.csv(file.path(inp, "WFS-MICE EwE 2.13 v67020-Catch.csv"),
-                         header = FALSE, nrows = 1)[, -c(1:2)]), fixed = TRUE)); fleet.names <- fleet.names[seq_len(length(fleet.names) - 1)]
-  obs.ts <- fn.read_ecosim_timeseries(file.path(inp, "ts_mice_v5_discards_ecospace_regions_sedar105.csv"))
-  ri <- read.csv(file.path(run_dir, "run_info.csv")); g <- function(k) ri$value[ri$field == k]
-  rel <- as.numeric(strsplit(g("setting.relative.types"), " ")[[1]])
-  obs.ts$ts.head$Absolute[obs.ts$ts.head$Type %in% rel] <- FALSE
-  sg <- as.numeric(strsplit(g("setting.stanza.groups"), " ")[[1]]); ld <- as.numeric(strsplit(g("setting.lead.stanza"), " ")[[1]])
-  obs.ts$ts.head$Absolute[obs.ts$ts.head$Type == 104 & obs.ts$ts.head$Poolcode %in% setdiff(sg, ld)] <- FALSE
-  region.areas <- fn.read_region_areas(file.path(REPO_DIR, "combined_regions_5min_attributes.csv"))
-  maps <- strsplit(g("setting.spatial.maps"), " ")[[1]]
-  so <- fn.load_gfisher_sdmTMB(sdm_dir = SDM_DIR, maps = maps, styear = as.numeric(g("setting.spatial.styear")),
-                               endyear = as.numeric(g("setting.spatial.endyear")), cv.weight = identical(g("setting.spatial.cv.weight"), "TRUE"))
 
   member_dir <- function(cmd) {                  # folder of a candidate inside output/gen30_small
     key <- sub("^(run_g[0-9]+_i[0-9]+).*", "\\1", basename(dirname(gsub("\\\\", "/", cmd))))
@@ -155,8 +195,8 @@ if (RUN_RESCORE) {
     list(temporal = unname(r$LL["LL.total"]), series = setNames(det$loglik, skey(det)), maps = sp$per_species)
   }
 
-  # ---- 6. re-score the ensemble members: do they miss the same series? ------------------------------
-  cat("\n[6] Re-scoring", N_ENS, "members from output/gen30_small ...\n")
+  # ---- 3.1 re-score the ensemble members: do they miss the same series? ------------------------------
+  cat("\n[3.1] Re-scoring", N_ENS, "members from output/gen30_small ...\n")
   dirs <- vapply(runs$cmd_file[seq_len(N_ENS)], member_dir, character(1)); stopifnot(!anyNA(dirs))
   sc   <- lapply(dirs, score_dir)
   keys <- names(sc[[1]]$series)
@@ -191,7 +231,7 @@ if (RUN_RESCORE) {
                        fitness = fit, temporal = Tm, spatial = spat, round(Mp, 2), check.names = FALSE),
             file.path(out_dir, "06_member_totals_and_maps.csv"), row.names = FALSE)
 
-  # ---- 6b. (optional) temporal and spatial NLL of ALL 370 candidates of the final population ---------------------------
+  # ---- 3.2 (optional) temporal and spatial NLL of ALL 370 candidates of the final population ---------------------------
   # Shows whether the spatial NLL varies among candidates while the temporal NLL does, which is the closest the saved
   # outputs get to the "temporal and spatial NLL over generations" question (only generations 25 to 30 were kept).
   # Takes much longer than section 6 (370 re-scorings), so it is off by default.
@@ -204,12 +244,12 @@ if (RUN_RESCORE) {
     allp <- data.frame(role = runs$role, generation = gen_of, fitness = runs$fitness, temporal = Tall, spatial = runs$fitness - Tall)
     write.csv(allp, file.path(out_dir, "06b_final_population_temporal_vs_spatial.csv"), row.names = FALSE)
     good <- allp[is.finite(allp$temporal) & allp$fitness < 8000, ]
-    cat("\n[6b] Candidates with NLL below 8,000:", nrow(good), "| SD of temporal NLL:", round(sd(good$temporal), 1),
+    cat("\n[3.2] Candidates with NLL below 8,000:", nrow(good), "| SD of temporal NLL:", round(sd(good$temporal), 1),
         "| SD of spatial NLL:", round(sd(good$spatial), 1), "| correlation temporal vs spatial:", round(cor(good$temporal, good$spatial), 2), "\n")
     print(summary(allp[, c("temporal", "spatial")]))
   }
 
-  # ---- 7. entropy of the observed maps and divergence ----------------------------------------------------
+  # ---- 3.3 entropy of the observed maps and divergence ----------------------------------------------------
   map_vectors <- function(d, i) {                # same steps as the inner loop of fn.spatial_LL, for row i of 'so'
     row_pcs <- if ("pcs" %in% names(so)) so$pcs else as.list(so$pc)
     pm <- r4("fn.ecospace_spatial_pred")(d, unique(unlist(row_pcs[i])), group.names, styear = so$styear[i],
@@ -240,14 +280,14 @@ if (RUN_RESCORE) {
   wide <- merge(ent[ent$model == "baseline", -2], ent[ent$model == "best", -2], by = "map", all.x = TRUE,
                 suffixes = c(".base", ".best"))
   wide$change_in_divergence <- wide$divergence.best - wide$divergence.base
-  cat("\n[7] Cross-entropy, entropy of the observed map and divergence (nats, before the weight of", SPATIAL_WEIGHT, ")\n")
+  cat("\n[3.3] Cross-entropy, entropy of the observed map and divergence (nats, before the weight of", SPATIAL_WEIGHT, ")\n")
   print(wide, digits = 4, row.names = FALSE)
   chk <- ent[ent$model == "best", ]
   cat("Check against the GA: sum of weighted cross-entropy of the maps saved for the best member =",
       round(SPATIAL_WEIGHT * sum(chk$cross_entropy), 1), "\n")
   write.csv(ent, file.path(out_dir, "07_entropy_and_divergence_by_map.csv"), row.names = FALSE)
 
-  # ---- 8. residual autocorrelation (Moran's I) and distribution metrics --------------------------------------
+  # ---- 3.4 residual autocorrelation (Moran's I) and distribution metrics --------------------------------------
   moran_knn <- function(row, col, r, k = 8, nperm = 499) {        # Moran's I with k nearest neighbours, permutation p
     n <- length(r); z <- r - mean(r); xy <- cbind(col, row)
     nb <- matrix(0L, n, k)
@@ -271,15 +311,48 @@ if (RUN_RESCORE) {
                                   cbind(map = so$species[i], what = "predicted", dist_metrics(mv$col, mv$row, mv$pred)))
   }
   mo <- do.call(rbind, mo); dm <- do.call(rbind, dm)
-  cat("\n[8] Moran's I of the residuals of the best member (k = 8 nearest cells; n_eff_approx = n (1 - I) / (1 + I)):\n")
+  cat("\n[3.4] Moran's I of the residuals of the best member (k = 8 nearest cells; n_eff_approx = n (1 - I) / (1 + I)):\n")
   print(mo, digits = 3, row.names = FALSE)
   cat("\nDistribution metrics, observed vs predicted (grid cells; D95 = cells holding 95% of the mass):\n")
   print(dm, digits = 4, row.names = FALSE)
   write.csv(mo, file.path(out_dir, "08_moran_residuals_best.csv"), row.names = FALSE)
   write.csv(dm, file.path(out_dir, "08_distribution_metrics_best.csv"), row.names = FALSE)
+  # ---- 3.5 relative RMSE of the 12 stanza biomass series (gag and red grouper), baseline vs best vs members ----------
+  # These series come from the stock assessments, were part of the GA objective, and are left out of the partition in
+  # the contribution figure; the RRMSE is only a reference. Relative series are scaled by q = mean(pred) / mean(obs)
+  # and RRMSE = rmse / mean(obs), as in the rest of the project. Writes plots_R/ts/Reference_stanza_biomass_rrmse.csv.
+  th <- obs.ts$ts.head; j_all <- which(grepl("_age[1-6]_biomass$", th$Title))
+  dirs_rr <- c(base = file.path(run_dir, "output/run_base"),
+               setNames(vapply(runs$cmd_file[seq_len(N_ENS)], member_dir, character(1)), paste0("m", seq_len(N_ENS))))
+  obs_yrs <- as.numeric(rownames(obs.ts$ts)); styear <- min(obs_yrs)
+  norm_name <- function(x) tolower(gsub("[^a-z0-9]", "", tolower(x)))
+  rrmse_dir <- function(d){
+    regs <- r4(".detect_ecospace_regions")(d, "annual")
+    arr <- r4("fn.read_pred_ecospace_wide")(d, "Biomass", "annual", regs, styear, aggregate_by_group = FALSE)
+    ri0 <- if(0L %in% as.integer(sub("R", "", dimnames(arr)[[3]]))) which(as.integer(sub("R", "", dimnames(arr)[[3]])) == 0L) else 1L
+    common <- match(obs_yrs, as.numeric(dimnames(arr)[[1]]))
+    sapply(j_all, function(j){
+      col <- match(norm_name(group.names[th$Poolcode[j]]), norm_name(dimnames(arr)[[2]]))
+      p <- arr[, col, ri0, 1][common]; o <- obs.ts$ts[, j]; o[o <= 0] <- NA
+      ok <- !is.na(o) & !is.na(p) & p > 0; q <- 1
+      if(!isTRUE(th$Absolute[j])) q <- mean(p[ok]) / mean(o[ok])
+      sqrt(mean((o[ok] - p[ok] / q)^2)) / mean(o[ok]) })
+  }
+  RR <- sapply(dirs_rr, rrmse_dir); rownames(RR) <- th$Title[j_all]
+  mem <- RR[, -1]
+  rr_out <- data.frame(series = th$Title[j_all], rrmse_baseline = RR[, "base"], rrmse_best = RR[, "m1"], rrmse_ens_mean = rowMeans(mem),
+                       rrmse_ens_min = apply(mem, 1, min), rrmse_ens_max = apply(mem, 1, max))
+  rr_out$species <- ifelse(grepl("^GAG", rr_out$series), "Gag", "Red grouper")
+  rr_out$stanza <- as.integer(sub(".*_age([1-6])_.*", "\\1", rr_out$series)) - 1
+  rr_out <- rr_out[order(rr_out$species, rr_out$stanza), ]; print(round(rr_out[, 2:6], 3))
+  agg <- function(k) c(baseline = mean(rr_out$rrmse_baseline[k]), best = mean(rr_out$rrmse_best[k]), ens_mean = mean(rr_out$rrmse_ens_mean[k]),
+                       ens_min = min(colMeans(mem[rr_out$series[k], , drop = FALSE])), ens_max = max(colMeans(mem[rr_out$series[k], , drop = FALSE])))
+  print(round(rbind(Gag = agg(rr_out$species == "Gag"), Red = agg(rr_out$species != "Gag"), All = agg(rep(TRUE, nrow(rr_out))),
+                    `Gag no stanza5+` = agg(rr_out$species == "Gag" & rr_out$stanza < 5)), 3))
+  write.csv(rr_out, file.path(run_dir, "plots_R", "ts", "Reference_stanza_biomass_rrmse.csv"), row.names = FALSE)
 }
 
-# ---- 10. run-to-run noise from parameter sets that the GA evaluated more than once -------------------------
+# ---- 4. run-to-run noise from parameter sets that the GA evaluated more than once -------------------------
 # ga_evals_ga01.csv holds every evaluation of the run. Some offspring were identical parameter vectors, so the
 # same set was run twice: the difference between the two scores is a direct measure of the noise of Ecospace
 # at the NLL levels the GA worked at. This needs no new runs and answers the noise bracket and the tolerance.
@@ -289,7 +362,7 @@ ev$key <- do.call(paste, c(lapply(ev[pcols], function(v) format(round(v, 6), tri
 dup <- ev[ev$key %in% ev$key[duplicated(ev$key)], ]
 st  <- do.call(rbind, lapply(split(dup, dup$key), function(d)
   data.frame(n = nrow(d), mean = mean(d$fitness), sd = sd(d$fitness), range = diff(range(d$fitness)))))
-cat("\n[10] Parameter vectors evaluated more than once:", nrow(st), "(of", nrow(ev), "evaluations)\n")
+cat("\n[4] Parameter vectors evaluated more than once:", nrow(st), "(of", nrow(ev), "evaluations)\n")
 big <- st$range > 1000
 cat("Pairs that differ by more than 1,000 NLL units:", sum(big), "(", paste(round(st$range[big]), collapse = ", "), ")\n")
 noise <- function(x, label) cat(sprintf("%-28s vectors %3d | pooled SD %5.1f | median range %5.1f | relative SD %.2f%%\n", label, nrow(x),
@@ -302,10 +375,10 @@ sdn <- sqrt(mean(ok$sd[ok$mean < 8000]^2))
 cat("Stop tolerance", round(tol, 1), "= ", round(tol / sdn, 2), "x the SD of a single run near the optimum.\n")
 cat("SD of the difference between two members =", round(sqrt(2) * sdn, 1), "NLL units; ensemble span =",
     round(diff(range(runs$fitness[seq_len(N_ENS)])), 1), "(", round(diff(range(runs$fitness[seq_len(N_ENS)])) / (sqrt(2) * sdn), 1), "such SDs ).\n")
-write.csv(st, file.path(out_dir, "10_repeated_evaluations.csv"))
+write.csv(st, file.path(out_dir, "04_repeated_evaluations.csv"))
 
-# ---- 9. replicates of the finalists vs the stopping tolerance ---------------------------------------------
-# File written by 'ga finalist replicates WFS MICE.R' (Windows): columns id, rep, nll, fitness_ga.
+# ---- 5. replicates of the finalists vs the stopping tolerance ---------------------------------------------
+# File written by 'ga post-run checks WFS MICE.R' (Windows): columns id, rep, nll, fitness_ga.
 replicate_summary <- function(rep_csv, tol = 32.2973, baseline_sd = 21.18, B = 2000) {
   r <- read.csv(rep_csv); stopifnot(all(c("id", "nll", "fitness_ga") %in% names(r)))
   m   <- tapply(r$nll, r$id, mean); sdv <- tapply(r$nll, r$id, sd); ga <- tapply(r$fitness_ga, r$id, mean)
@@ -322,6 +395,6 @@ replicate_summary <- function(rep_csv, tol = 32.2973, baseline_sd = 21.18, B = 2
 }
 rep_file <- file.path(run_dir, "sens1", "finalist_replicates.csv")
 if (file.exists(rep_file)) replicate_summary(rep_file, tol) else
-  cat("\n[9] finalist_replicates.csv not found: run 'ga finalist replicates WFS MICE.R' on the Windows machine first.\n")
+  cat("\n[5] finalist_replicates.csv not found: run 'ga post-run checks WFS MICE.R' on the Windows machine first.\n")
 
 cat("\nDone. Tables in:", out_dir, "\n")
