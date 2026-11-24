@@ -128,7 +128,8 @@ pA <- ggplot(A2, aes(xa)) + geom_hline(yintercept = 0, linetype = "dashed") + ge
   annotate("text", x = (0:3) * 3 + 1.5, y = Inf, label = c("Biomass", "Catch", "F", "Spatial"), vjust = 1.4, fontface = "bold", size = 4.1) +
   scale_x_continuous(breaks = as.vector(outer(c(0.85, 2.15), (0:3) * 3, "+")), labels = rep(c("Gag", "Red"), 4), limits = c(0, 12), expand = c(0, 0)) +
   scale_y_continuous(labels = function(x) paste0(x, "%"), limits = c(-45, 15), breaks = seq(-40, 10, 10), expand = c(0, 0)) +
-  labs(x = NULL, y = "Change of total NLL (%)") + th +
+  coord_cartesian(clip = "off") +
+  labs(x = NULL, y = "Change in total NLL (%)") + th +
   theme(plot.margin = margin(5.5, 5.5, 5.5, 5.5), axis.text.x = element_text(size = 10.7), panel.grid.major.x = element_line(colour = "grey80", linewidth = 0.4, linetype = "dashed"), legend.position = "none")
 
 #---- B: change by stanza (catch and F only) ------------------------------------------------------------------
@@ -333,7 +334,7 @@ make_c <- function(sp, ylab = TRUE){
     annotate("text", x = bs + 2.5, y = Inf, label = c("Biomass", "Catch", "F"), vjust = 1.4, fontface = "bold", size = 5.4) +
     ens_scale + scale_x_continuous(breaks = unlist(lapply(bs, function(st) st + 0:5)), labels = rep(c("0", "1", "2", "3", "4", "5+"), 3), limits = c(0.25, 19.75), expand = c(0, 0)) +
     scale_y_continuous(labels = function(x) paste0(x, "%"), expand = expansion(mult = c(0.05, 0.12)), limits = c(-33, 4)) +
-    labs(title = sp, x = "Stanza (age)", y = "Change of total NLL (%)") + th +
+    labs(title = sp, x = "Stanza (age)", y = "Change in total NLL (%)") + th +
     theme(plot.title = element_text(face = "bold", size = 19, hjust = 0.5), legend.position = "none", panel.grid.major.x = element_line(colour = "grey80", linewidth = 0.4, linetype = "dashed"),
           axis.text.x = element_text(size = 11.5, colour = "black"))
 }
@@ -370,7 +371,7 @@ pEF <- ggplot(Gb, aes(xl)) + geom_hline(yintercept = 0, linetype = "dashed") +
   geom_text(aes(x = xe, y = 5.4, label = edge), hjust = 0, size = 4.3, colour = "#C0392B", fontface = "bold") +
   geom_text(aes(x = xn, y = 5.4, label = paste0("/", n)), hjust = 0, size = 4.3, colour = "black") +
   scale_y_continuous(labels = function(x) paste0(x, "%"), breaks = seq(-25, 0, 5), expand = c(0, 0)) + scale_x_discrete(expand = expansion(add = 0.6)) + coord_cartesian(ylim = c(-26, 7), clip = "off") +
-  labs(x = NULL, y = "Change of total NLL (%)") + th_p + th_dot + theme(plot.margin = margin(5.5, 5.5, 5.5, 5.5), axis.text.x = element_text(size = 10.7, colour = "black", lineheight = 0.9), panel.grid.major.x = element_line(colour = "grey80", linewidth = 0.4, linetype = "dashed"), panel.grid.major.y = element_line(colour = "grey88", linewidth = 0.4))
+  labs(x = NULL, y = "Change in total NLL (%)") + th_p + th_dot + theme(plot.margin = margin(5.5, 5.5, 5.5, 5.5), axis.text.x = element_text(size = 10.7, colour = "black", lineheight = 0.9), panel.grid.major.x = element_line(colour = "grey80", linewidth = 0.4, linetype = "dashed"), panel.grid.major.y = element_line(colour = "grey88", linewidth = 0.4))
 
 
 W <- function(p) p   # plain patchwork: panel areas are aligned across rows and columns
