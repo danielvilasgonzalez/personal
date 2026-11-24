@@ -356,7 +356,7 @@ fig_needs <- file.path(PLOTS, c("nll_temporal_by_series.csv", "nll_spatial_by_ma
                                 "nll_partition_temporal_vs_spatial.csv",
                                 file.path("discussion_checks", "06_member_series_nll.csv")))
 if(all(file.exists(fig_needs))){
-  local(source(file.path(REPO_DIR, "fig contribution of components phase6.R"), local = TRUE))
+  local(source(file.path(REPO_DIR, "fig contribution and parameters phase6.R"), local = TRUE))
 } else {
   message("Skipping section 7, missing: ", paste(basename(fig_needs[!file.exists(fig_needs)]), collapse = ", "))
 }
