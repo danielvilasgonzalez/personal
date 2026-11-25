@@ -102,6 +102,18 @@
 #'   places the legend inside the panel, top-right.
 #' @return A ggplot object.
 #' @export
+.breaks_with_baseline <- function(baseline){
+  function(lims){
+    b <- pretty(lims)
+    if(!is.null(baseline) && is.finite(baseline)){
+      b <- b[abs(b - baseline) > 0.06 * diff(lims)]
+      b <- sort(c(b, baseline))
+    }
+    b[b >= lims[1] & b <= lims[2]]
+  }
+}
+.baseline_labels <- function(x) format(round(x), big.mark = ",", trim = TRUE)
+
 plot_nll_convergence_panel <- function(ga2, primary_col, primary_label, primary_color,
                                        sd_col = "sd_LL", sd_label = "sd NLL", sd_color = "#C0392B",
                                        sd_max = 150000, gen_breaks = NULL,
@@ -188,6 +200,7 @@ plot_nll_convergence_panel <- function(ga2, primary_col, primary_label, primary_
     ggplot2::scale_y_continuous(
       name = primary_label,
       limits = y_limits,
+      breaks = .breaks_with_baseline(baseline), labels = .baseline_labels,
       sec.axis = ggplot2::sec_axis(~ (. - offs) / sf, name = sd_label)
     ) +
     ggplot2::labs(x = "generation") +
@@ -319,6 +332,7 @@ plot_nll_mean_median_max_panel <- function(ga2,
     ggplot2::scale_y_continuous(
       name = "mean and median NLL",
       limits = y_limits,
+      breaks = .breaks_with_baseline(baseline), labels = .baseline_labels,
       sec.axis = ggplot2::sec_axis(~ (. - offs) / sf, name = max_label)
     ) +
     ggplot2::labs(x = "generation") +
@@ -3684,6 +3698,19 @@ aggregate_biomass_by_region <- function(run_dir, group_token, region_mask, cell_
 }
 
 
+# Outline (cell edges) of the modelled area: every non-NA cell of an esri-ascii mask is a modelled water cell; an edge is drawn wherever a neighbour is land or outside the grid.
+.domain_outline_segments <- function(mask, cs = 0.08333334){
+  w <- mask[!is.na(mask$value), c("row", "col", "lat", "lon"), drop = FALSE]
+  key <- paste(w$row, w$col); h <- cs / 2
+  edge <- function(dr, dc) !(paste(w$row + dr, w$col + dc) %in% key)
+  t <- edge(-1, 0); b <- edge(1, 0); l <- edge(0, -1); r <- edge(0, 1)
+  rbind(data.frame(x = w$lon[t] - h, xend = w$lon[t] + h, y = w$lat[t] + h, yend = w$lat[t] + h),
+        data.frame(x = w$lon[b] - h, xend = w$lon[b] + h, y = w$lat[b] - h, yend = w$lat[b] - h),
+        data.frame(x = w$lon[l] - h, xend = w$lon[l] - h, y = w$lat[l] - h, yend = w$lat[l] + h),
+        data.frame(x = w$lon[r] + h, xend = w$lon[r] + h, y = w$lat[r] - h, yend = w$lat[r] + h))
+}
+
+
 #' @title Plot a region-ID raster, colored/labeled by region name.
 #' @param region_mask Output of read_esri_ascii() (e.g. on age0_survey_regions_5min_mod.asc
 #'   or combined_regions_5min.asc).
@@ -3709,7 +3736,7 @@ aggregate_biomass_by_region <- function(run_dir, group_token, region_mask, cell_
 #' @export
 plot_region_map <- function(region_mask, region_attributes = NULL, title = "",
                             palette = "custom", region_colors = NULL,
-                            show_land = TRUE, fixed_aspect = FALSE, base_size = 11){
+                            show_land = TRUE, fixed_aspect = FALSE, base_size = 11, outline_domain = TRUE){
   if(!requireNamespace("ggplot2", quietly = TRUE))
     stop("Package 'ggplot2' is required. Install it with install.packages('ggplot2').")
   
@@ -3764,6 +3791,10 @@ plot_region_map <- function(region_mask, region_attributes = NULL, title = "",
     p <- p + ggplot2::scale_fill_manual(values = region_colors, name = "Region", na.value = "white")
   }
   
+  if(outline_domain){   # contour of the modelled area (water cells of the mask), so the extent of the model is visible
+    seg <- .domain_outline_segments(region_mask)
+    p <- p + ggplot2::geom_segment(data = seg, ggplot2::aes(x = x, xend = xend, y = y, yend = yend), inherit.aes = FALSE, colour = "black", linewidth = 0.9, lineend = "round")
+  }
   p <- p + if(fixed_aspect) ggplot2::coord_quickmap() else ggplot2::coord_cartesian(expand = FALSE)
   p
 }
@@ -3839,6 +3870,7 @@ plot_region_timeseries_grid <- function(run_dir = NULL, init_run_dir = NULL, gro
                                         cell_area_km2 = 9.26108^2,
                                         map_palette = "custom", map_show_land = TRUE,
                                         map_fixed_aspect = FALSE,
+                                        ribbon_probs = c(0.025, 0.975),   # lower / upper quantile of the ribbon (c(0.05, 0.95) = 90% interval across the selected models)
                                         plots_dir = "plots",
                                         png_file = NULL,
                                         width = 16, height = 16, dpi = 400){
@@ -4019,7 +4051,7 @@ plot_region_timeseries_grid <- function(run_dir = NULL, init_run_dir = NULL, gro
         ens_dt <- data.table::as.data.table(ens_long)
         ens_summary <- ens_dt[, {
           wm <- stats::weighted.mean(biomass_sum, weight, na.rm = TRUE)
-          qs <- weighted_quantile(biomass_sum, weight, probs = c(0.025, 0.975))
+          qs <- weighted_quantile(biomass_sum, weight, probs = ribbon_probs)
           list(mean_val = wm, lo = qs[1], hi = qs[2])
         }, by = .(year, region_id)]
         ens_summary <- as.data.frame(ens_summary)
@@ -4040,7 +4072,7 @@ plot_region_timeseries_grid <- function(run_dir = NULL, init_run_dir = NULL, gro
           ens_domain_dt <- data.table::as.data.table(ens_domain_long)
           domain_summary <- ens_domain_dt[, {
             wm <- stats::weighted.mean(biomass_sum, weight, na.rm = TRUE)
-            qs <- weighted_quantile(biomass_sum, weight, probs = c(0.025, 0.975))
+            qs <- weighted_quantile(biomass_sum, weight, probs = ribbon_probs)
             list(mean_val = wm, lo = qs[1], hi = qs[2])
           }, by = .(year)]
           domain_summary <- as.data.frame(domain_summary)

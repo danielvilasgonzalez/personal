@@ -275,8 +275,8 @@ region_ts <- plot_region_timeseries_grid(
   ga_runs = ga_runs, species_pattern = "gag 0", init_run_dir = BASE_RUN,
   region_mask = age0_regions, region_attributes = region_attrs, obs = obs,
   domain_obs_pattern = "FWCNMFS", map_show_land = TRUE,
-  show_ensemble = TRUE, ensemble_style = "ribbon",   # manuscript look: baseline (dashed) + ensemble mean + 95% band per region
-  ens_mode = "quantile", keep_fitness_quantile = ENS_PROP,
+  show_ensemble = TRUE, ensemble_style = "ribbon",   # baseline (dashed) + mean of ALL final models + 90% interval (5th-95th percentile) per region; the map outlines the modelled area
+  ens_mode = "quantile", keep_fitness_quantile = 1, ribbon_probs = c(0.05, 0.95),
   ensemble_max_folders = N_CAND, plots_dir = file.path(PLOTS, "ts"))
 print(table(region_ts$run, region_ts$region_id))   # an "init" row per region = baseline is drawn
 
