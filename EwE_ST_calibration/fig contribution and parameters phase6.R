@@ -210,8 +210,9 @@ if(file.exists(f_ps) && file.exists(f_pm)){
                                       change = 100 * (vals[, i] - A2$base[i]) / base_gr, fit = fit_p, rk = rank_p)))
   pop_pts <- pop_pts[is.finite(pop_pts$share) & is.finite(pop_pts$change), ]
   if(!exists("ENS_PROP")) ENS_PROP <- 0.8
+if(!exists("CONTRIB_ENSEMBLE_ONLY")) CONTRIB_ENSEMBLE_ONLY <- FALSE   # FALSE = all 370 final-generation models; TRUE = only the ensemble
 fit_cut <- as.numeric(quantile(runs_f$fitness, ENS_PROP))   # ensemble = final-generation models with NLL at or below this quantile (same cut as every other ensemble figure)
-pop_pts <- pop_pts[pop_pts$fit <= fit_cut, ]
+if(isTRUE(CONTRIB_ENSEMBLE_ONLY)) pop_pts <- pop_pts[pop_pts$fit <= fit_cut, ]   # default: all final-generation models (NLL results); predictions use the ensemble
 pop_pts <- pop_pts[order(-pop_pts$fit), ]   # draw the worst models first so the lowest NLL ends up on top
   message("population points: ", nrow(pop_pts) / nrow(A2), " models; total NLL worse than baseline: ", sum(tot_p > base_gr, na.rm = TRUE))
   write.csv(pop_pts, file.path(pr, "ts", "Fig_contribution_A_population.csv"), row.names = FALSE)
@@ -269,7 +270,7 @@ if(STRIPS){   # two rows per side: share of the remaining NLL (strip) above the 
       100 * (pred0 - 10^predict(fit_all, Pr)$predictions) / base_full })
     names(eff) <- types
     spp <- do.call(rbind, lapply(types, function(t) data.frame(type = t, xl = Gb$xl[match(t, as.character(Gb$type))], y = eff[[t]], fit = fit_f, rank = seq_along(fit_f))))
-    spp <- spp[spp$fit <= fit_cut, ]
+    if(isTRUE(CONTRIB_ENSEMBLE_ONLY)) spp <- spp[spp$fit <= fit_cut, ]
     write.csv(spp[, c("type", "rank", "fit", "y")], file.path(pr, "ts", "Fig_parameter_type_effect_surrogate.csv"), row.names = FALSE)
     lo_y <- floor(min(quantile(spp$y, 0.005), na.rm = TRUE) / 5) * 5; hi_y <- 5
     spp_in <- spp[is.finite(spp$y) & spp$y >= lo_y & spp$y <= hi_y, ]
