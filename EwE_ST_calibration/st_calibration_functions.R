@@ -383,7 +383,7 @@ VAR_TYPE_MAP <- list(
   # original R4EwE code) is F = Catch / Biomass, computed from the two files above
   # rather than read from its own file (see build_predicted_vector_generic()).
   F       = list(types = c(4L, 104L),      group_via = "Poolcode1",
-                 y_lab = "Fishing mortality F (Catch / Biomass, yr\u207b\u00b9)",
+                 y_lab = "F (year\u207b\u00b9)",
                  derived_from = c("Catch", "Biomass"))
 )
 
@@ -1650,7 +1650,7 @@ compare_best_vs_ensemble_mean <- function(ga_runs, vars = c("Biomass", "Catch", 
 # map panels, placed in one patchwork cell spanning every row, so the bar's top and bottom
 # coincide with the top of the first panel box and the bottom of the last panel box.
 .nll_bar_plot <- function(limits, palette = "magma", base_size = 10,
-                          title_size = 11, axis_title_size = 11, axis_text_size = 9){
+                          title_size = 11, axis_title_size = 11, axis_text_size = 9, top_plus = FALSE){
   yy <- exp(seq(log(limits[1]), log(limits[2]), length.out = 300))
   d  <- data.frame(x = 1, y = yy)
   ggplot2::ggplot(d, ggplot2::aes(x = x, y = y, fill = y)) +
@@ -1658,7 +1658,11 @@ compare_best_vs_ensemble_mean <- function(ga_runs, vars = c("Biomass", "Catch", 
     .nll_scale(limits, palette, "fill") +
     ggplot2::scale_x_continuous(expand = c(0, 0), breaks = 1, labels = "0000") +
     ggplot2::scale_y_log10(expand = c(0, 0), position = "right",
-                           labels = function(x) format(x, big.mark = "", scientific = FALSE, trim = TRUE)) +
+                           # ticks at the minimum and the maximum of the scale plus the usual log breaks in between;
+                           # (candidates above the maximum get the top colour)
+                           breaks = function(lim){ b <- scales::log_breaks(n = 5)(lim); b <- b[b > lim[1] * 1.04 & b < lim[2] / 1.04]; sort(unique(c(lim[1], b, lim[2]))) },
+                           labels = function(x){ l <- format(round(x), big.mark = "", scientific = FALSE, trim = TRUE)
+                                                 l }) +
     ggplot2::coord_cartesian(ylim = limits) +
     ggplot2::labs(title = "NLL", x = "Year", y = NULL) +
     ggplot2::theme_bw(base_size = base_size) +
@@ -1748,6 +1752,7 @@ plot_ga_ensemble_faceted <- function(obs = NULL,
                                      show_candidates       = TRUE,   # FALSE: only baseline / best / ensemble mean
                                      show_mean             = FALSE,  # TRUE: draw the ensemble mean (equal weights unless ens_mode = "aic")
                                      file_suffix           = "",
+                                     text_scale            = 1,     # multiplies every text size (panel titles, axes, in-panel legend, bottom legend, NLL bar)
                                      plots_dir             = "plots",
                                      width = 10, height = 7, dpi = 150){
   
@@ -1758,6 +1763,7 @@ plot_ga_ensemble_faceted <- function(obs = NULL,
          "each stanza its own y-axis range). Install it with install.packages('patchwork').")
   if(overlay_obs && is.null(obs))
     stop("overlay_obs = TRUE requires `obs` (output of read_ewe_timeseries()).")
+  ydig_env <- new.env()
   ens_mode <- match.arg(ens_mode)
   
   unknown_vars <- setdiff(vars, names(VAR_TYPE_MAP))
@@ -1933,7 +1939,7 @@ plot_ga_ensemble_faceted <- function(obs = NULL,
         n_series <- length(series_levels)
         y_range <- y_max - y_min
         legend_x <- x_min + x_range * 0.043
-        legend_spacing <- y_range * 0.045
+        legend_spacing <- y_range * 0.045 * text_scale
         legend_y <- y_max - y_range * 0.035 - seq(0, n_series - 1) * legend_spacing
         data.frame(year = legend_x, value = legend_y, series = series_levels)
       }
@@ -2028,11 +2034,11 @@ plot_ga_ensemble_faceted <- function(obs = NULL,
         if(!is.null(obs_legend)){
           pp <- pp +
             ggplot2::geom_point(data = obs_legend, ggplot2::aes(x = year, y = value, shape = series),
-                                fill = "white", color = "black", size = 1.9, stroke = 0.7,
+                                fill = "white", color = "black", size = 1.9 * text_scale, stroke = 0.7,
                                 inherit.aes = FALSE, show.legend = FALSE) +
             ggplot2::geom_text(data = obs_legend,
                                ggplot2::aes(x = year + diff(x_rng) * 0.026, y = value, label = series),
-                               hjust = 0, vjust = 0.5, size = 2.6, color = "black", inherit.aes = FALSE)
+                               hjust = 0, vjust = 0.5, size = 2.6 * text_scale, color = "black", inherit.aes = FALSE)
         }
         if(nrow(sub_obs) > 0)
           pp <- pp + ggplot2::scale_shape_manual(values = rep(21:25, length.out = n_series_here), guide = "none")
@@ -2040,7 +2046,8 @@ plot_ga_ensemble_faceted <- function(obs = NULL,
           (if(show_candidates) .nll_scale(fitness_limits, palette) else NULL) +
           ggplot2::scale_x_continuous(expand = c(0, 0)) +
           ggplot2::scale_y_continuous(expand = c(0, 0),
-                                      labels = function(x) format(x, scientific = FALSE, trim = TRUE)) +   # 0.001, not 1e-03
+                                      labels = function(x){ d <- ydig_env$d      # same number of decimals in every panel of the figure (set below, before drawing)
+                                        if(is.null(d)) format(x, scientific = FALSE, trim = TRUE) else formatC(x, format = "f", digits = d) }) +
           # coord_cartesian(), not scale_y_continuous(limits=) -- the latter DROPS any
           # point outside the range entirely, which is why several ensemble candidate
           # lines were missing from the plot (their values extended beyond the
@@ -2048,19 +2055,19 @@ plot_ga_ensemble_faceted <- function(obs = NULL,
           # window, keeping every line's full data intact.
           ggplot2::coord_cartesian(ylim = c(y_min, y_max_plot)) +
           ggplot2::labs(title = gn, x = "Year", y = info$y_lab) +
-          ggplot2::theme_bw(base_size = 10) +
+          ggplot2::theme_bw(base_size = 10 * text_scale) +
           ggplot2::theme(
             aspect.ratio = 1,
             panel.grid.major = ggplot2::element_line(colour = scales::alpha("grey25", 0.35),
                                                      linetype = "dashed", linewidth = 0.2),
             panel.grid.minor = ggplot2::element_blank(),
-            plot.title = ggplot2::element_text(size = 11, face = "bold", hjust = 0.5,
+            plot.title = ggplot2::element_text(size = 11 * text_scale, face = "bold", hjust = 0.5,
                                                margin = ggplot2::margin(0, 0, 4, 0)),
-            axis.title.x = if(show_x_axis) ggplot2::element_text(size = 11) else ggplot2::element_blank(),
-            axis.text.x  = if(show_x_axis) ggplot2::element_text(size = 9)  else ggplot2::element_blank(),
+            axis.title.x = if(show_x_axis) ggplot2::element_text(size = 11 * text_scale) else ggplot2::element_blank(),
+            axis.text.x  = if(show_x_axis) ggplot2::element_text(size = 9 * text_scale)  else ggplot2::element_blank(),
             axis.ticks.x = if(show_x_axis) ggplot2::element_line(linewidth = 0.5) else ggplot2::element_blank(),
-            axis.title.y = if(show_y_axis) ggplot2::element_text(size = 11) else ggplot2::element_blank(),
-            axis.text.y  = if(show_y_axis) ggplot2::element_text(size = 9)  else ggplot2::element_blank(),
+            axis.title.y = if(show_y_axis) ggplot2::element_text(size = 11 * text_scale) else ggplot2::element_blank(),
+            axis.text.y  = if(show_y_axis) ggplot2::element_text(size = 9 * text_scale)  else ggplot2::element_blank(),
             axis.ticks.y = if(show_y_axis) ggplot2::element_line(linewidth = 0.5) else ggplot2::element_blank(),
             legend.position = "none",
             plot.margin = ggplot2::margin(4, 2, 4, 2)
@@ -2073,6 +2080,14 @@ plot_ga_ensemble_faceted <- function(obs = NULL,
         message("  [skip] ", var, " '", sp, "': no panels to plot.")
         next
       }
+      # same number of decimals on every y axis (needed so the panel widths match): the largest number of decimals any panel needs
+      ydig_env$d <- local({
+        dec <- vapply(panel_list, function(pp){
+          br <- tryCatch(ggplot2::ggplot_build(pp)$layout$panel_params[[1]]$y$breaks, error = function(e) NULL)
+          br <- br[is.finite(br)]; if(length(br) == 0) return(0L)
+          for(d in 0:8) if(all(abs(round(br, d) - br) < 1e-9 * max(1, max(abs(br))))) return(d)
+          8L }, integer(1))
+        max(dec) })
       
       # ---- dedicated bottom legend for the three FIXED-color reference lines (init,
       # best-fit, ensemble mean) -- these are drawn via separate geom_line() calls with
@@ -2114,7 +2129,7 @@ plot_ga_ensemble_faceted <- function(obs = NULL,
         ggplot2::scale_linetype_manual(values = ref_line_linetypes, name = NULL) +
         ggplot2::theme_void() +
         ggplot2::theme(legend.position = "bottom",
-                       legend.text = ggplot2::element_text(size = 10),
+                       legend.text = ggplot2::element_text(size = 10 * text_scale),
                        legend.margin = ggplot2::margin(0, 0, 0, 0),
                        plot.margin = ggplot2::margin(0, 0, 0, 0),
                        # widened so a dashed key actually shows multiple dash segments
@@ -2140,7 +2155,7 @@ plot_ga_ensemble_faceted <- function(obs = NULL,
       # plot_spacer() with a NEGATIVE height stacked ABOVE the legend via `/` (see
       # nll_legend_plot below), which shifts the legend upward to compensate for the
       # panels' own title space -- not a margin tweak on the legend plot itself.
-      p <- if(show_candidates) .assemble_nll_figure(panel_list, facet_ncol, .nll_bar_plot(fitness_limits, palette)) else
+      p <- if(show_candidates) .assemble_nll_figure(panel_list, facet_ncol, .nll_bar_plot(fitness_limits, palette, base_size = 10 * text_scale, title_size = 11 * text_scale, axis_title_size = 11 * text_scale, axis_text_size = 9 * text_scale, top_plus = max(valid$fitness, na.rm = TRUE) > fitness_limits[2] * 1.0001)) else
         patchwork::wrap_plots(panel_list, ncol = facet_ncol)
       
       # stack the reference-line legend below the whole figure (panel grid + NLL bar)

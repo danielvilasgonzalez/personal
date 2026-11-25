@@ -197,9 +197,21 @@ if (RUN_RESCORE) {
 
   # ---- 3.1 re-score the ensemble members: do they miss the same series? ------------------------------
   cat("\n[3.1] Re-scoring", N_ENS, "members from output/gen30_small ...\n")
-  dirs <- vapply(runs$cmd_file[seq_len(N_ENS)], member_dir, character(1)); stopifnot(!anyNA(dirs))
-  sc   <- lapply(dirs, score_dir)
-  keys <- names(sc[[1]]$series)
+  # all 370 candidates of the final population are scored (the ensemble is the best N_ENS of them); the population files
+  # (06_population_*.csv) feed the grey points of the contribution figure. Set SCORE_POPULATION <- FALSE to score only the ensemble.
+  SCORE_POPULATION <- TRUE
+  n_sc <- if(SCORE_POPULATION) nrow(runs) else N_ENS
+  dirs <- vapply(runs$cmd_file[seq_len(n_sc)], member_dir, character(1)); stopifnot(!anyNA(dirs))
+  sc_all <- lapply(dirs, function(d) tryCatch(score_dir(d), error = function(e) NULL))
+  ok_sc <- !vapply(sc_all, is.null, logical(1)); cat("scored:", sum(ok_sc), "of", n_sc, "\n")
+  keys <- names(sc_all[[which(ok_sc)[1]]]$series)
+  if(SCORE_POPULATION){
+    Sp <- t(sapply(sc_all, function(x) if(is.null(x)) rep(NA_real_, length(keys)) else x$series[keys]))
+    Mpp <- t(sapply(sc_all, function(x) if(is.null(x)) rep(NA_real_, length(sc_all[[which(ok_sc)[1]]]$maps)) else x$maps)); colnames(Mpp) <- names(sc_all[[which(ok_sc)[1]]]$maps)
+    write.csv(data.frame(rank = seq_len(n_sc), fitness = runs$fitness[seq_len(n_sc)], Sp, check.names = FALSE), file.path(out_dir, "06_population_series_matrix.csv"), row.names = FALSE)
+    write.csv(data.frame(rank = seq_len(n_sc), fitness = runs$fitness[seq_len(n_sc)], round(Mpp, 2), check.names = FALSE), file.path(out_dir, "06_population_maps.csv"), row.names = FALSE)
+  }
+  sc <- sc_all[seq_len(N_ENS)]; stopifnot(!anyNA(vapply(sc, is.null, logical(1))))
   S    <- t(sapply(sc, function(x) x$series[keys]))               # members x series
   Tm   <- sapply(sc, function(x) x$temporal)
   write.csv(data.frame(member = seq_len(N_ENS), S, check.names = FALSE), file.path(out_dir, "06_member_series_matrix.csv"), row.names = FALSE)   # NLL of every series for every member (used for the stanza biomass ranges in Fig. X)

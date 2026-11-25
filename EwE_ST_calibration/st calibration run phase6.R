@@ -229,14 +229,17 @@ if(EXTRA_PLOTS){
   print(ens_summary)
 }
 
-if(EXTRA_PLOTS){
-  facet_aic <- plot_ga_ensemble_faceted(
-    obs, ga_runs, init_run_dir = BASE_RUN, vars = c("Biomass", "Catch", "F"),
-    species_patterns = c("gag", "red grouper"),
-    ens_mode = "quantile", keep_fitness_quantile = 1,   # ALL last-generation models, coloured by NLL
-    palette = "plasma", alpha = 1, line_width = 0.4, file_suffix = "_all_models", plots_dir = file.path(PLOTS, "ts"))    # same colours as Figs 4-5; + baseline + best only
-  print(facet_aic)
-}
+# Supplementary: ALL 370 last-generation models (not only the best ENS_PROP), coloured by NLL, + baseline + best (no ensemble mean).
+# The y-axis follows the observations (ylim_from_obs = TRUE) because the worst candidates are far off scale; the colour scale is capped
+# at the 95th percentile of the NLL. Files: <Var>_ensemble_facet_<species>_quantile_all_models.png
+facet_all_models <- plot_ga_ensemble_faceted(
+  obs, ga_runs, init_run_dir = BASE_RUN, vars = c("Biomass", "Catch", "F"),
+  species_patterns = c("gag", "red grouper"),
+  ens_mode = "quantile", keep_fitness_quantile = 1, max_candidates = 1000,
+  palette = "plasma", alpha = 0.55, line_width = 0.3, show_mean = FALSE, ylim_from_obs = TRUE, ylim_pad = 0.3,
+  text_scale = 1.4,   # larger text; no ensemble mean when all models are drawn
+  file_suffix = "_all_models", plots_dir = file.path(PLOTS, "ts"))
+print(facet_all_models)
 
 # Figs 4-5 and supplementary catch / F: the best ENS_PROP of the final population, coloured by NLL, + baseline + best
 facet_aic_mean <- plot_ga_ensemble_faceted(

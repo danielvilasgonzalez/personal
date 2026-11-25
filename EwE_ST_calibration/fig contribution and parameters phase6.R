@@ -1,8 +1,9 @@
 #---------------------------------------------------------------------------------------------------------------
 # Figure: contribution of components to the fit (phase6 ga01), manuscript Fig. X
-#   A  change in total NLL by species and type of series (biomass indices, catch, F, spatial), best model and ensemble range,
+#   A  composition of the best-model NLL (temporal vs spatial, species, type of series, focal maps)
+#   B  change in total NLL by species and type of series (biomass indices, catch, F, spatial), best model and ensemble range,
 #      as a percentage of the baseline NLL of the gag and red grouper data (46 scored series + four focal maps)
-#   B  the same total change allocated to each type of parameter by its share of the NLL variation across the GA evaluations
+#   C  the same total change allocated to each type of parameter by its share of the NLL variation across the GA evaluations
 #      (random forest, grouped permutation importance; descriptive), with the parameters at a search bound out of all of each type
 #
 # The stanza biomass series (GAG_age1..6_biomass, REDGRP_age1..6_biomass) come from the stock assessments and are treated as
@@ -72,7 +73,7 @@ pA <- ggplot(A2, aes(xa)) + geom_hline(yintercept = 0, linetype = "dashed") + ge
   scale_x_continuous(breaks = as.vector(outer(c(0.85, 2.15), (0:3) * 3, "+")), labels = rep(c("Gag", "Red"), 4), limits = c(0, 12), expand = c(0, 0)) +
   scale_y_continuous(labels = function(x) paste0(x, "%"), limits = c(-45, 15), breaks = seq(-40, 10, 10), expand = c(0, 0)) +
   coord_cartesian(clip = "off") +   # clip off so the panel border has the same width as in B
-  labs(x = NULL, y = "Change in total NLL (%)") + th +
+  labs(x = NULL, y = "Change in NLL\n(% of baseline total)") + th +
   theme(plot.margin = margin(5.5, 5.5, 5.5, 5.5), axis.text.x = element_text(size = 10.7))
 
 #---- change by stanza (table only, quoted in the Results text) -------------------------------------------------------
@@ -114,7 +115,9 @@ run_once <- function(seed){   # one random split, forest and set of permutations
   list(r2 = r2, t = 100 * inc_t / sum(inc_t), p = 100 * inc_p / sum(inc_t))
 }
 rds <- file.path(pr, "ts", "param_importance_runs.rds")   # cached; delete it to refit
-rf_runs <- if(file.exists(rds)) readRDS(rds) else { r <- lapply(seq_len(NREP), run_once); saveRDS(r, rds); r }
+rf_runs <- if(file.exists(rds)) readRDS(rds) else NULL
+if(!is.null(rf_runs) && (length(rf_runs[[1]]$t) != length(types) || length(rf_runs) != NREP)) rf_runs <- NULL   # stale cache from an older parameter grouping: refit
+if(is.null(rf_runs)) { r <- lapply(seq_len(NREP), run_once); saveRDS(r, rds); rf_runs <- r }
 r2 <- mean(sapply(rf_runs, function(r) r$r2))
 Tm <- sapply(rf_runs, function(r) r$t); Pm <- sapply(rf_runs, function(r) r$p)
 q <- function(M, p) apply(M, 1, quantile, probs = p)
@@ -156,12 +159,65 @@ pB <- ggplot(Gb, aes(xl)) + geom_hline(yintercept = 0, linetype = "dashed") +
   geom_text(aes(x = xn, y = 5.4, label = paste0("/", n)), hjust = 0, size = 4.3, colour = "black") +
   scale_y_continuous(labels = function(x) paste0(x, "%"), breaks = seq(-25, 0, 5), expand = c(0, 0)) + scale_x_discrete(expand = expansion(add = 0.6)) +
   coord_cartesian(ylim = c(-26, 7), clip = "off") +
-  labs(x = NULL, y = "Change in total NLL (%)") + th +
+  labs(x = NULL, y = "Change in NLL\n(% of baseline total)") + th +
   theme(plot.margin = margin(5.5, 5.5, 5.5, 5.5), axis.text.x = element_text(size = 10.7, colour = "black", lineheight = 0.9))
 
-#---- combine and save ------------------------------------------------------------------------------------------------
-fig <- (pA + pB + plot_layout(design = "AB", widths = c(1, 1))) + plot_annotation(tag_levels = list(c("A", "B"))) & theme(plot.tag = element_text(face = "bold", size = 23))
+#---- Fig. composition: what the best-model NLL is made of ------------------------------------------------------------
+# stacked bars, each row = 100% of the quantity named on the left (best model; the full objective: 46 series + all maps)
+sp_best_total <- { pt <- file.path(pr, "nll_partition_temporal_vs_spatial.csv"); if(file.exists(pt)) read.csv(pt)$spatial_NLL[read.csv(pt)$model == "best"] else NA_real_ }
+tb_best <- sum(ser$best)
+age0 <- grepl("_AGE0_", ser$Title) & gag
+fz <- ser$best
+comp <- rbind(
+  data.frame(row = "Total NLL", part = c("Temporal", "Spatial"), v = c(tb_best, sp_best_total)),
+  data.frame(row = "Temporal", part = c("Gag", "Red grouper", "Other"), v = c(sum(fz[gag]), sum(fz[red]), sum(fz[!gag & !red]))),
+  data.frame(row = "Temporal, gag", part = c("Age-0 indices", "Catch", "F", "Other"),
+             v = c(sum(fz[age0]), sum(fz[gag & stype == "Catch"]), sum(fz[gag & stype == "Fishing mortality"]), sum(fz[gag & stype == "Survey indices" & !age0]))),
+  data.frame(row = "Spatial (focal maps)", part = c("Gag 2-4", "Gag 5+", "Red grouper 3-4", "Red grouper 5+"),
+             v = sapply(c("gag 2-4", "gag 5+", "red grouper 3-4", "red grouper 5+"), function(k) spm$best[spm$map == k])))
+comp$pct <- 100 * ave(comp$v, comp$row, FUN = function(x) x / sum(x))
+rows_ord <- c("Total NLL", "Temporal", "Temporal, gag", "Spatial (focal maps)")
+comp$row <- factor(comp$row, levels = rev(rows_ord)); comp <- comp[comp$pct >= 0.5, ]
+comp$part <- factor(comp$part, levels = unique(c("Temporal", "Spatial", "Gag", "Red grouper", "Age-0 indices", "Catch", "F", "Other", "Gag 2-4", "Gag 5+", "Red grouper 3-4", "Red grouper 5+")))
+comp$grp <- paste(comp$row, comp$part)
+comp$lab <- ifelse(comp$pct >= 3.5, sprintf("%s\n%.1f%%", comp$part, comp$pct), "")
+pal <- c(Temporal = "#1B4F72", Spatial = "#E69F00", Gag = "#3A9D5D", `Red grouper` = "#C44E52", `Age-0 indices` = "#56B4E9", Catch = "#D55E00", F = "#999999", Other = "#B0C4DE",
+         `Gag 2-4` = "#3A9D5D", `Gag 5+` = "#1F6B3A", `Red grouper 3-4` = "#C44E52", `Red grouper 5+` = "#8E2F33")
+pComp <- ggplot(comp, aes(pct, row, fill = part)) + geom_col(width = 0.84, colour = "white", linewidth = 0.5, position = position_stack(reverse = TRUE)) +
+  geom_text(aes(label = lab, size = pct < 8), position = position_stack(vjust = 0.5, reverse = TRUE), colour = "white", lineheight = 0.9) + scale_size_manual(values = c(`FALSE` = 3.0, `TRUE` = 2.4), guide = "none") +
+  scale_fill_manual(values = pal, guide = "none") + scale_x_continuous(labels = function(x) paste0(x, "%"), expand = c(0, 0)) +
+  labs(x = "Share of the best-model NLL within each row", y = NULL) + th + theme(panel.grid = element_blank(), panel.border = element_blank(), plot.margin = margin(5.5, 14, 5.5, 5.5), axis.line.x = element_line(colour = "black"))
+comp$pct <- round(comp$pct, 1); write.csv(comp[, c("row", "part", "v", "pct")], file.path(pr, "ts", "Fig_composition_best_model.csv"), row.names = FALSE)
+#---- combine and save: A share of the best-model NLL (top strip) and change from baseline (below), by species and type; B change allocated to parameter types ----
+# share = best-model NLL of each species x type as a percentage of the best-model NLL of gag + red grouper (46 series + four focal maps; same basis as the change)
+A2$share <- 100 * A2$best / sum(A2$best)
+# ensemble: share of each member's own gag + red grouper NLL (best-model share = bar; ensemble mean = point; ensemble min-max = line)
+mem_part <- function(sp, ty){ sel <- if(sp == "Gag") gag else red; if(ty == "Spatial") mem_sp(if(sp == "Gag") c("gag 2-4", "gag 5+") else c("red grouper 3-4", "red grouper 5+")) else mem_sum(sel, ty) }
+for(i in seq_len(nrow(A2))){ m <- 100 * mem_part(A2$species[i], A2$type[i]) / mem_gr; A2$sh_mean[i] <- mean(m); A2$sh_lo[i] <- min(m); A2$sh_hi[i] <- max(m) }
+write.csv(A2[, c("species", "part", "base", "best", "share", "best_p", "mean_p", "min_p", "max_p", "sh_mean", "sh_lo", "sh_hi")], file.path(pr, "ts", "Fig_contribution_A_best_ensemble.csv"), row.names = FALSE)
+col_sp <- c(Gag = "#3A9D5D", Red = "#C44E52"); A2$sp2 <- ifelse(A2$species == "Gag", "Gag", "Red")
+xs <- scale_x_continuous(breaks = as.vector(outer(1:2, (0:3) * 3, "+")), labels = rep(c("Gag", "Red"), 4), limits = c(0, 12), expand = c(0, 0))
+pS <- ggplot(A2, aes(xa, share, fill = sp2)) + geom_vline(xintercept = c(3, 6, 9), colour = "grey40") + geom_col(width = 0.8, colour = "grey15", linewidth = 0.3) +
+  geom_linerange(aes(ymin = sh_lo, ymax = sh_hi), colour = "black", linewidth = 0.6) +
+  annotate("text", x = (0:3) * 3 + 1.5, y = Inf, label = c("Biomass", "Catch", "F", "Spatial"), vjust = 1.4, fontface = "bold", size = 4.4) +
+  scale_fill_manual(values = col_sp, guide = "none") + xs +
+  scale_y_continuous(limits = c(0, 70), breaks = c(0, 25, 50), labels = function(x) paste0(x, "%"), expand = c(0, 0)) +
+  labs(x = NULL, y = "Share of total\nNLL (%)") + th +
+  coord_cartesian(clip = "off") +
+  theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(), panel.grid.major.x = element_line(colour = "grey80", linewidth = 0.4, linetype = "dashed"), plot.margin = margin(12, 5.5, 0, 12), axis.title.y = element_text(size = 12), panel.border = element_rect(colour = "black", fill = NA, linewidth = 0.7))
+pA2 <- pA + coord_cartesian(clip = "off") + theme(panel.grid.major.x = element_line(colour = "grey80", linewidth = 0.4, linetype = "dashed")) + theme(axis.title.y = element_text(size = 12), plot.margin = margin(2, 5.5, 5.5, 5.5))
+pA2$layers <- pA2$layers[!vapply(pA2$layers, function(l) inherits(l$geom, "GeomText"), logical(1))]   # titles are drawn once, in the strip above
+pB <- pB + theme(axis.title.y = element_text(size = 12))
+pSB <- ggplot(Gb, aes(xl, share)) + geom_col(width = 0.7, fill = "grey55", colour = "grey15", linewidth = 0.3) +
+  scale_y_continuous(limits = c(0, 62), breaks = c(0, 25, 50), labels = function(x) paste0(x, "%"), expand = c(0, 0)) + scale_x_discrete(expand = expansion(add = 0.6)) +
+  labs(x = NULL, y = "Share of NLL\nvariation (%)") + th + coord_cartesian(clip = "off") +
+  theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(), panel.grid.major.x = element_line(colour = "grey80", linewidth = 0.4, linetype = "dashed"),
+        plot.margin = margin(12, 5.5, 0, 5.5), axis.title.y = element_text(size = 12), panel.border = element_rect(colour = "black", fill = NA, linewidth = 0.7))
+pB2 <- pB + theme(plot.margin = margin(2, 5.5, 5.5, 5.5))
+right <- (pSB / pB2) + plot_layout(heights = c(0.55, 1))
+left <- (pS / pA2) + plot_layout(heights = c(0.55, 1))
+fig <- (wrap_elements(full = left) + wrap_elements(full = right) + plot_layout(widths = c(1, 1))) + plot_annotation(tag_levels = list(c("A", "B"))) & theme(plot.tag = element_text(face = "bold", size = 23), plot.tag.position = c(0.01, 0.99))
 f_pdf <- file.path(pr, "ts", paste0("Fig_contribution_of_components", tag, ".pdf")); f_png <- sub("\\.pdf$", ".png", f_pdf)
-ggsave(f_pdf, fig, width = 9, height = 3.8, device = cairo_pdf)
+ggsave(f_pdf, fig, width = 9.5, height = 5.2, device = cairo_pdf)
 if(requireNamespace("pdftools", quietly = TRUE)){ pdftools::pdf_convert(f_pdf, format = "png", dpi = 300, filenames = f_png, verbose = FALSE)
-} else ggsave(f_png, fig, width = 9, height = 3.8, dpi = 300, bg = "white")
+} else ggsave(f_png, fig, width = 9.5, height = 5.2, dpi = 300, bg = "white")

@@ -22,9 +22,11 @@
 #                      = NLL(baseline) - NLL(only_<type>) (what it gains alone); if the two differ the types interact.
 #     Types: vul, redtide, env, flt, disp. The tags are written by fn.parvec2cmd as cmd_base followed by the tags in the
 #     order vulnerabilities, environmental, red tide, dispersal, mediation, fleet; every tag prefix is checked before running.
-#     Output: revert_one_type.csv (id, member, variant, nll, dir.out) -> <RUN>/sens1/. Keep the output folders in
-#     SCRATCH_REVERT: the gag + red grouper NLL of each run is re-scored from them with the same code as the 37-member
-#     matrix (section 3.1 of 'st results phase6.R'), because LL.total also holds the other groups.
+#     Output (-> <RUN>/sens1/): revert_one_type.csv (id, member, variant, nll = LL.total of all groups, dir.out) and
+#     revert_one_type_by_series.csv (id, member, variant, kind, key, nll: every scored series and every focal map of every run,
+#     scored from the run's own output folder with the same calls as the 37-member matrix, section 3.1 of 'st results phase6.R').
+#     The by-species effect of each parameter type (gag, red grouper) is built from the second file on the Mac.
+#     Keep SCRATCH_REVERT until the scoring has finished (it is scored in this script, right after the runs).
 #     Cost: (2 + 2 x 5) x N_MEM runs; N_MEM = 37 gives 444 runs, about 2.5 h. Set N_MEM <- 1 for a first check (12 runs).
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 rm(list = ls()); graphics.off(); gc()
@@ -177,4 +179,25 @@ write.csv(out, OUT_CSV_REVERT, row.names = FALSE)
 print(aggregate(nll ~ variant, out, mean))
 cat("control: mean |NLL(full) - GA fitness| =", round(mean(abs(out$nll[out$variant == "full"] - out$fitness_ga[out$variant == "full"])), 1),
     "(about the run-to-run noise, SD 21)\nwritten:", OUT_CSV_REVERT, "\n")
+
+#SCORE EVERY RUN BY SERIES AND BY FOCAL MAP (so the effect can be split into gag and red grouper)------------------
+skey <- function(d) paste(d$Title, d$Poolcode, d$Type.name, d$Region, d$n, sep = "|")
+score_dir <- function(d) {
+  r   <- fn.ecospace_objfxn(dir.pred = d, obs.ts = obs.ts, group.names = group.names, fleet.names = fleet.names,
+                            fit.abs.catch = fit.abs.catch, spatial.obs = NULL, spatial.weight = spatial.weight,
+                            region.areas = region.areas, return = "both")
+  det <- r$detail[is.finite(r$detail$loglik), ]
+  sp  <- suppressWarnings(fn.spatial_LL(dir.pred = d, spatial.obs = spatial.obs, spatial.weight = spatial.weight,
+                                        group.names = group.names, model_styear = model_styear))
+  rbind(data.frame(kind = "series", key = skey(det), nll = det$loglik),
+        data.frame(kind = "map", key = names(sp$per_species), nll = as.numeric(sp$per_species)))
+}
+by_series <- do.call(rbind, lapply(seq_len(nrow(runlist)), function(i) {
+  sc <- tryCatch(score_dir(runlist$dir.out[i]), error = function(e) { message("scoring failed: ", runlist$id[i], " ", conditionMessage(e)); NULL })
+  if (is.null(sc)) return(NULL)
+  if (i %% 20 == 0) message("scored ", i, " / ", nrow(runlist))
+  data.frame(id = runlist$id[i], member = runlist$member[i], variant = runlist$variant[i], sc)
+}))
+write.csv(by_series, sub("revert_one_type\\.csv$", "revert_one_type_by_series.csv", OUT_CSV_REVERT), row.names = FALSE)
+cat("written:", sub("revert_one_type\\.csv$", "revert_one_type_by_series.csv", OUT_CSV_REVERT), "\n")
 }
