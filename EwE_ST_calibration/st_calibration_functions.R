@@ -126,6 +126,12 @@
   ifelse(abs(b - baseline) < 1e-6 * max(1, abs(baseline)), "grey35", "black")
 }
 
+.baseline_text_sizes <- function(baseline, lims, size = 9.6, baseline_size = 7.5){
+  b <- .breaks_with_baseline(baseline)(lims)
+  if(is.null(baseline) || !is.finite(baseline)) return(size)
+  ifelse(abs(b - baseline) < 1e-6 * max(1, abs(baseline)), baseline_size, size)
+}
+
 plot_nll_convergence_panel <- function(ga2, primary_col, primary_label, primary_color,
                                        sd_col = "sd_LL", sd_label = "sd NLL", sd_color = "#C0392B",
                                        sd_max = 150000, gen_breaks = NULL,
@@ -221,8 +227,8 @@ plot_nll_convergence_panel <- function(ga2, primary_col, primary_label, primary_
       axis.title = ggplot2::element_text(face = "bold"),
       axis.title.y.right = ggplot2::element_text(face = "bold"),
       axis.text = ggplot2::element_text(color = "black"),
-      axis.text.y = ggplot2::element_text(color = .baseline_text_colors(baseline, y_limits)),
-      axis.text.y.right = ggplot2::element_text(color = "black"),
+      axis.text.y = ggplot2::element_text(color = .baseline_text_colors(baseline, y_limits), size = .baseline_text_sizes(baseline, y_limits)),
+      axis.text.y.right = ggplot2::element_text(color = "black", size = 9.6),
       panel.grid.minor = ggplot2::element_blank(),
       legend.position = legend_position,
       legend.justification = legend_justification,
@@ -355,8 +361,8 @@ plot_nll_mean_median_max_panel <- function(ga2,
       axis.title = ggplot2::element_text(face = "bold"),
       axis.title.y.right = ggplot2::element_text(face = "bold"),
       axis.text = ggplot2::element_text(color = "black"),
-      axis.text.y = ggplot2::element_text(color = .baseline_text_colors(baseline, y_limits)),
-      axis.text.y.right = ggplot2::element_text(color = "black"),
+      axis.text.y = ggplot2::element_text(color = .baseline_text_colors(baseline, y_limits), size = .baseline_text_sizes(baseline, y_limits)),
+      axis.text.y.right = ggplot2::element_text(color = "black", size = 9.6),
       panel.grid.minor = ggplot2::element_blank(),
       legend.position = legend_position,
       legend.justification = legend_justification,
