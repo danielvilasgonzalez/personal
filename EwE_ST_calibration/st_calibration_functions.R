@@ -112,7 +112,13 @@
     b[b >= lims[1] & b <= lims[2]]
   }
 }
-.baseline_labels <- function(x) format(round(x), big.mark = ",", trim = TRUE)
+.baseline_labels <- function(baseline){
+  function(x){
+    lab <- format(round(x), big.mark = ",", trim = TRUE)
+    if(!is.null(baseline) && is.finite(baseline)) lab[abs(x - baseline) < 1e-6 * max(1, abs(baseline))] <- paste0("Baseline\n", format(round(baseline), big.mark = ",", trim = TRUE))
+    lab
+  }
+}
 
 plot_nll_convergence_panel <- function(ga2, primary_col, primary_label, primary_color,
                                        sd_col = "sd_LL", sd_label = "sd NLL", sd_color = "#C0392B",
@@ -184,7 +190,7 @@ plot_nll_convergence_panel <- function(ga2, primary_col, primary_label, primary_
                         shape = 16, size = 1.6, alpha = 0.7) +
     {if(!is.null(baseline)) list(
       ggplot2::geom_hline(yintercept = baseline, linetype = "dashed", colour = "grey35", linewidth = 0.6),
-      if(!is.null(baseline_label)) ggplot2::annotate("text", x = mean(range(ga2$gen, na.rm = TRUE)) * 0.4, y = baseline, hjust = 0.5, vjust = -0.5, size = 3.2,
+      if(FALSE) ggplot2::annotate("text", x = mean(range(ga2$gen, na.rm = TRUE)) * 0.4, y = baseline, hjust = 0.5, vjust = -0.5, size = 3.2,
                         colour = "grey35", label = paste0(baseline_label, " (", format(round(baseline), big.mark = ","), ")")))} +
     ggplot2::scale_colour_manual(values = colors, name = NULL) +
     # scale_y_continuous(limits=), NOT coord_cartesian() -- this is what makes sec_axis()
@@ -200,8 +206,8 @@ plot_nll_convergence_panel <- function(ga2, primary_col, primary_label, primary_
     ggplot2::scale_y_continuous(
       name = primary_label,
       limits = y_limits,
-      breaks = .breaks_with_baseline(baseline), labels = .baseline_labels,
-      sec.axis = ggplot2::sec_axis(~ (. - offs) / sf, name = sd_label)
+      breaks = .breaks_with_baseline(baseline), labels = .baseline_labels(baseline),
+      sec.axis = ggplot2::sec_axis(~ (. - offs) / sf, name = sd_label, labels = function(x) format(x, big.mark = ",", trim = TRUE, scientific = FALSE))
     ) +
     ggplot2::labs(x = "generation") +
     .theme_bw(base_size = 12) +
@@ -326,14 +332,14 @@ plot_nll_mean_median_max_panel <- function(ga2,
                         shape = 16, size = 1.6, alpha = 0.7) +
     {if(!is.null(baseline)) list(
       ggplot2::geom_hline(yintercept = baseline, linetype = "dashed", colour = "grey35", linewidth = 0.6),
-      if(!is.null(baseline_label)) ggplot2::annotate("text", x = mean(range(ga2$gen, na.rm = TRUE)) * 0.4, y = baseline, hjust = 0.5, vjust = -0.5, size = 3.2,
+      if(FALSE) ggplot2::annotate("text", x = mean(range(ga2$gen, na.rm = TRUE)) * 0.4, y = baseline, hjust = 0.5, vjust = -0.5, size = 3.2,
                         colour = "grey35", label = paste0(baseline_label, " (", format(round(baseline), big.mark = ","), ")")))} +
     ggplot2::scale_colour_manual(values = colors, name = NULL) +
     ggplot2::scale_y_continuous(
       name = "mean and median NLL",
       limits = y_limits,
-      breaks = .breaks_with_baseline(baseline), labels = .baseline_labels,
-      sec.axis = ggplot2::sec_axis(~ (. - offs) / sf, name = max_label)
+      breaks = .breaks_with_baseline(baseline), labels = .baseline_labels(baseline),
+      sec.axis = ggplot2::sec_axis(~ (. - offs) / sf, name = max_label, labels = function(x) format(x, big.mark = ",", trim = TRUE, scientific = FALSE))
     ) +
     ggplot2::labs(x = "generation") +
     .theme_bw(base_size = 12) +
@@ -3711,6 +3717,18 @@ aggregate_biomass_by_region <- function(run_dir, group_token, region_mask, cell_
 }
 
 
+# Extent of an Ecospace map export (EcospaceMap*.csv): cells holding a predicted value (not -9999) in the first map frame, returned in the same layout as read_esri_ascii()
+.extent_mask_from_map_csv <- function(path, nrows = 66, ncols = 78, top_lat = 30.5, top_lon = -87.5, cellsize = 0.08333334){
+  L <- readLines(path, warn = FALSE)
+  d <- L[grepl("^-?[0-9]", L)][seq_len(nrows)]
+  mat <- do.call(rbind, lapply(strsplit(sub(",\\s*$", "", d), ","), as.numeric))
+  row_idx <- rep(seq_len(nrows), times = ncols); col_idx <- rep(seq_len(ncols), each = nrows)
+  vals <- as.vector(mat); vals[vals == -9999] <- NA_real_
+  message(".extent_mask_from_map_csv(): ", basename(path), " -- ", sum(!is.na(vals)), " cell(s) with predictions.")
+  data.frame(row = row_idx, col = col_idx, lat = top_lat - (row_idx - 1) * cellsize,
+             lon = top_lon + (col_idx - 1) * cellsize, value = vals)
+}
+
 #' @title Plot a region-ID raster, colored/labeled by region name.
 #' @param region_mask Output of read_esri_ascii() (e.g. on age0_survey_regions_5min_mod.asc
 #'   or combined_regions_5min.asc).
@@ -3736,7 +3754,7 @@ aggregate_biomass_by_region <- function(run_dir, group_token, region_mask, cell_
 #' @export
 plot_region_map <- function(region_mask, region_attributes = NULL, title = "",
                             palette = "custom", region_colors = NULL,
-                            show_land = TRUE, fixed_aspect = FALSE, base_size = 11, outline_domain = TRUE){
+                            show_land = TRUE, fixed_aspect = FALSE, base_size = 11, outline_domain = TRUE, extent_mask = NULL){
   if(!requireNamespace("ggplot2", quietly = TRUE))
     stop("Package 'ggplot2' is required. Install it with install.packages('ggplot2').")
   
@@ -3768,8 +3786,8 @@ plot_region_map <- function(region_mask, region_attributes = NULL, title = "",
   p <- ggplot2::ggplot(df, ggplot2::aes(x = lon, y = lat, fill = region_label)) +
     ggplot2::geom_raster() +
     ggplot2::labs(title = title, x = "Longitude", y = "Latitude", fill = "Region") +
-    ggplot2::scale_x_continuous(expand = c(0, 0)) +
-    ggplot2::scale_y_continuous(expand = c(0, 0)) +
+    ggplot2::scale_x_continuous(expand = if(outline_domain) ggplot2::expansion(mult = 0.015) else c(0, 0)) +
+    ggplot2::scale_y_continuous(expand = if(outline_domain) ggplot2::expansion(mult = 0.015) else c(0, 0)) +
     .theme_bw(base_size = base_size) +
     ggplot2::theme(panel.grid = ggplot2::element_blank(),
                    # size/margin/vjust now MATCH the region panel title convention
@@ -3793,7 +3811,12 @@ plot_region_map <- function(region_mask, region_attributes = NULL, title = "",
   
   if(outline_domain){   # contour of the modelled area (water cells of the mask), so the extent of the model is visible
     seg <- .domain_outline_segments(region_mask)
-    p <- p + ggplot2::geom_segment(data = seg, ggplot2::aes(x = x, xend = xend, y = y, yend = yend), inherit.aes = FALSE, colour = "black", linewidth = 0.9, lineend = "round")
+    p <- p + ggplot2::geom_segment(data = seg, ggplot2::aes(x = x, xend = xend, y = y, yend = yend), inherit.aes = FALSE,
+                                   colour = if(is.null(extent_mask)) "black" else "grey45", linewidth = if(is.null(extent_mask)) 0.9 else 0.4, lineend = "round")
+  }
+  if(!is.null(extent_mask)){   # polygon contour of the cells that hold predictions (extent of the predicted rasters)
+    seg2 <- .domain_outline_segments(extent_mask)
+    p <- p + ggplot2::geom_segment(data = seg2, ggplot2::aes(x = x, xend = xend, y = y, yend = yend), inherit.aes = FALSE, colour = "black", linewidth = 0.9, lineend = "round")
   }
   p <- p + if(fixed_aspect) ggplot2::coord_quickmap() else ggplot2::coord_cartesian(expand = FALSE)
   p
@@ -3870,6 +3893,7 @@ plot_region_timeseries_grid <- function(run_dir = NULL, init_run_dir = NULL, gro
                                         cell_area_km2 = 9.26108^2,
                                         map_palette = "custom", map_show_land = TRUE,
                                         map_fixed_aspect = FALSE,
+                                        extent_csv = NULL,   # path to an EcospaceMap*.csv export: its predicted cells are outlined on the map
                                         ribbon_probs = c(0.025, 0.975),   # lower / upper quantile of the ribbon (c(0.05, 0.95) = 90% interval across the selected models)
                                         plots_dir = "plots",
                                         png_file = NULL,
@@ -4234,7 +4258,8 @@ plot_region_timeseries_grid <- function(run_dir = NULL, init_run_dir = NULL, gro
   # simple grid layout: map (bigger, 2x2 block) + region panels, plain reading order,
   # NO arrows/direction assignment -- this replaced an earlier radial/compass-arrow
   # design that turned out to be less readable in practice
-  map_panel <- plot_region_map(region_mask, region_attributes, title = paste0(group_token, " survey regions"),
+  extent_mask <- if(!is.null(extent_csv) && file.exists(extent_csv)) .extent_mask_from_map_csv(extent_csv) else NULL
+  map_panel <- plot_region_map(region_mask, region_attributes, title = paste0(group_token, " survey regions"), extent_mask = extent_mask,
                                palette = map_palette, region_colors = region_colors,
                                show_land = map_show_land, fixed_aspect = map_fixed_aspect,
                                base_size = base_size)
