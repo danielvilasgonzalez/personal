@@ -1769,6 +1769,7 @@ plot_ga_ensemble_faceted <- function(obs = NULL,
                                      show_mean             = FALSE,  # TRUE: draw the ensemble mean (equal weights unless ens_mode = "aic")
                                      file_suffix           = "",
                                      text_scale            = 1,     # multiplies every text size (panel titles, axes, in-panel legend, bottom legend, NLL bar)
+                                     combine_species       = FALSE, # TRUE: all matched species in ONE figure per variable (e.g. gag + red grouper biomass together)
                                      plots_dir             = "plots",
                                      width = 10, height = 7, dpi = 150){
   
@@ -1842,6 +1843,8 @@ plot_ga_ensemble_faceted <- function(obs = NULL,
     if(length(hit) == 0) NA_character_ else hit[1]
   }, character(1))
   target_groups <- target_groups[!is.na(target_groups$species), , drop = FALSE]
+  if(combine_species)   # one figure holding every matched group (rows follow the order of species_patterns)
+    target_groups$species <- paste(species_patterns, collapse = "_and_")
   
   safe_name <- function(s) gsub("[^A-Za-z0-9._-]+", "_", s)
   summary_rows <- list()

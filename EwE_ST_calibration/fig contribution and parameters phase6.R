@@ -20,6 +20,7 @@
 #---------------------------------------------------------------------------------------------------------------
 library(ggplot2); library(patchwork); library(ranger)
 
+STRIPS <- if(exists("STRIPS")) STRIPS else FALSE   # TRUE: add the share-of-remaining-NLL strips above each panel (old layout)
 RUN <- if(exists("RUN")) RUN else Sys.getenv("EWE_RUN", "/Users/daniel/Work/ST_calibration/phase6_ga01")   # uses RUN from the main script when sourced
 EXCLUDE_STANZA_BIOMASS <- TRUE
 N_ENS <- 37                                    # ensemble = best 10% of the final population
@@ -68,7 +69,7 @@ A2$xa <- (as.integer(A2$part) - 1) * 3 + ifelse(A2$species == "Gag", 0.85, 2.15)
 write.csv(A2, file.path(pr, "ts", "Fig_contribution_A_best_ensemble.csv"), row.names = FALSE)
 pA <- ggplot(A2, aes(xa)) + geom_hline(yintercept = 0, linetype = "dashed") + geom_vline(xintercept = c(3, 6, 9), colour = "grey30") +
   geom_errorbar(aes(ymin = min_p, ymax = max_p), colour = "black", width = 0.4, linewidth = 0.5) +
-  geom_point(aes(y = best_p), fill = col_best, colour = "grey15", shape = 21, size = 2.9, stroke = 0.5) +
+  geom_point(aes(y = best_p), fill = col_best, colour = "grey15", shape = 21, size = 1.9, stroke = 0.4) +
   annotate("text", x = (0:3) * 3 + 1.5, y = Inf, label = c("Biomass", "Catch", "F", "Spatial"), vjust = 1.4, fontface = "bold", size = 4.1) +
   scale_x_continuous(breaks = as.vector(outer(c(0.85, 2.15), (0:3) * 3, "+")), labels = rep(c("Gag", "Red"), 4), limits = c(0, 12), expand = c(0, 0)) +
   scale_y_continuous(labels = function(x) paste0(x, "%"), limits = c(-45, 15), breaks = seq(-40, 10, 10), expand = c(0, 0)) +
@@ -135,7 +136,7 @@ tot_pct <- 100 * (c(best = best_gr, mean = mean(mem_gr), lo = min(mem_gr), hi = 
 message("gag + red grouper total NLL: baseline ", round(base_gr), ", best ", round(best_gr), " (", round(tot_pct["best"], 1), "%), ensemble mean ",
         round(tot_pct["mean"], 1), "%, range ", round(tot_pct["lo"], 1), " to ", round(tot_pct["hi"], 1), "%")
 G$type <- factor(G$type, levels = G$type[order(-G$share)])
-sh <- function(x) sub("Vulnerabilities", "Vuln.", sub("Environmental curves", "Env.", sub("Red tide foraging", "RT for.", sub("Red tide mortality", "RT mort.", x))))
+sh <- function(x) c(Vulnerabilities = "Vul", `Environmental curves` = "Env fxn", `Red tide foraging` = "RT forag", `Red tide mortality` = "RT mort", Fleet = "Fleet mult", Dispersal = "Disp")[x]
 Gb <- G[order(-G$share), ]
 Gb$v   <- Gb$share / 100 * tot_pct["best"]                                           # share x total change of the best model
 Gb$vm  <- Gb$share / 100 * tot_pct["mean"]; Gb$vlo <- Gb$share / 100 * tot_pct["lo"]; Gb$vhi <- Gb$share / 100 * tot_pct["hi"]   # bar = range of the ensemble members
@@ -146,7 +147,7 @@ posb <- sapply(seq_along(par_tab$par), function(j) if(lgb[j]) (log(Xb[, j]) - lo
 medb <- apply(posb, 2, median); edge_b <- tapply(medb < 0.05 | medb > 0.95, ptype[par_tab$par], sum)
 Gb$edge <- as.numeric(edge_b[as.character(Gb$type)])
 # axis names on two lines; the count "at a bound / total" is drawn at the top, centred (red = at a bound)
-Gb$lab <- gsub("RT mort\\.", "RT\nmort.", gsub("RT for\\.", "RT\nfor.", sh(as.character(Gb$type))))
+Gb$lab <- unname(sub(" ", "\n", sh(as.character(Gb$type)), fixed = TRUE))   # two-line labels: RT/mort, Fleet/mult, Env/fxn, RT/forag; Vul and Disp one line
 Gb$lab <- ifelse(grepl("\n", Gb$lab), Gb$lab, paste0(Gb$lab, "\n "))
 Gb$xl <- factor(Gb$lab, levels = Gb$lab)
 Gb$we <- 0.2 * nchar(as.character(Gb$edge)); Gb$wn <- 0.12 + 0.19 * nchar(as.character(Gb$n))   # text widths in axis units
@@ -154,7 +155,7 @@ Gb$xe <- seq_len(nrow(Gb)) - (Gb$we + Gb$wn) / 2; Gb$xn <- Gb$xe + Gb$we
 write.csv(Gb[, c("type", "n", "edge", "share", "v", "vm", "vlo", "vhi")], file.path(pr, "ts", "Fig_contribution_B_allocation.csv"), row.names = FALSE)
 pB <- ggplot(Gb, aes(xl)) + geom_hline(yintercept = 0, linetype = "dashed") +
   geom_errorbar(aes(ymin = vlo, ymax = vhi), colour = "black", width = 0.3, linewidth = 0.6) +
-  geom_point(aes(y = v), fill = col_best, colour = "grey15", shape = 21, size = 2.9, stroke = 0.5) +
+  geom_point(aes(y = v), fill = col_best, colour = "grey15", shape = 21, size = 1.9, stroke = 0.4) +
   geom_text(aes(x = xe, y = 5.4, label = edge), hjust = 0, size = 4.3, colour = "#C0392B", fontface = "bold") +
   geom_text(aes(x = xn, y = 5.4, label = paste0("/", n)), hjust = 0, size = 4.3, colour = "black") +
   scale_y_continuous(labels = function(x) paste0(x, "%"), breaks = seq(-25, 0, 5), expand = c(0, 0)) + scale_x_discrete(expand = expansion(add = 0.6)) +
@@ -199,17 +200,26 @@ write.csv(A2[, c("species", "part", "base", "best", "share", "best_p", "mean_p",
 f_ps <- file.path(pr, "discussion_checks", "06_population_series_matrix.csv"); f_pm <- file.path(pr, "discussion_checks", "06_population_maps.csv")
 pop_pts <- NULL
 if(file.exists(f_ps) && file.exists(f_pm)){
-  Ps <- read.csv(f_ps, check.names = FALSE); Pmp <- read.csv(f_pm, check.names = FALSE); Ps$rank <- NULL; Ps$fitness <- NULL; Pmp$rank <- NULL; Pmp$fitness <- NULL
+  Ps <- read.csv(f_ps, check.names = FALSE); Pmp <- read.csv(f_pm, check.names = FALSE); rank_p <- Ps$rank; fit_p <- Ps$fitness; Ps$rank <- NULL; Ps$fitness <- NULL; Pmp$rank <- NULL; Pmp$fitness <- NULL
   sid_p <- sub("\\|.*$", "", names(Ps))
   part_p <- function(sp, ty){ sel <- if(sp == "Gag") gag else red
     if(ty == "Spatial") rowSums(Pmp[, if(sp == "Gag") maps_gag else maps_red, drop = FALSE]) else rowSums(Ps[, sid_p %in% ser$Title[sel & stype == ty], drop = FALSE]) }
   vals <- sapply(seq_len(nrow(A2)), function(i) part_p(A2$species[i], A2$type[i]))     # models x (species, type)
   tot_p <- rowSums(vals)
   pop_pts <- do.call(rbind, lapply(seq_len(nrow(A2)), function(i) data.frame(xa = A2$xa[i], share = 100 * vals[, i] / tot_p,
-                                      change = 100 * (vals[, i] - A2$base[i]) / base_gr)))
+                                      change = 100 * (vals[, i] - A2$base[i]) / base_gr, fit = fit_p, rk = rank_p)))
   pop_pts <- pop_pts[is.finite(pop_pts$share) & is.finite(pop_pts$change), ]
+  pop_pts <- pop_pts[order(-pop_pts$fit), ]   # draw the worst models first so the lowest NLL ends up on top
   message("population points: ", nrow(pop_pts) / nrow(A2), " models; total NLL worse than baseline: ", sum(tot_p > base_gr, na.rm = TRUE))
   write.csv(pop_pts, file.path(pr, "ts", "Fig_contribution_A_population.csv"), row.names = FALSE)
+}
+fit_scale <- NULL
+if(!is.null(pop_pts)){
+  lo_f <- min(pop_pts$fit, na.rm = TRUE); hi_f <- as.numeric(quantile(pop_pts$fit, 0.95, na.rm = TRUE))
+  fit_brk <- unique(c(lo_f, pretty(c(lo_f, hi_f), 4)[pretty(c(lo_f, hi_f), 4) > lo_f & pretty(c(lo_f, hi_f), 4) < hi_f], hi_f))
+  fit_scale <- scale_colour_viridis_c(option = "plasma", direction = -1, limits = c(lo_f, hi_f), oob = scales::squish, name = "NLL",
+                                      breaks = fit_brk, labels = function(x) format(round(x), big.mark = ""),
+                                      guide = "none")   # the colour bar is drawn as its own panel (pBar) so that it has the height of the panels
 }
 A2$base_share <- 100 * A2$base / sum(A2$base)     # baseline model, same basis as the strip
 col_sp <- c(Gag = "#3A9D5D", Red = "#C44E52"); A2$sp2 <- ifelse(A2$species == "Gag", "Gag", "Red")
@@ -224,9 +234,9 @@ pS <- ggplot(A2, aes(xa, share, fill = sp2)) + geom_vline(xintercept = c(3, 6, 9
   coord_cartesian(clip = "off") +
   theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(), panel.grid.major.x = element_line(colour = "grey80", linewidth = 0.4, linetype = "dashed"), plot.margin = margin(12, 5.5, 0, 12), axis.title.y = element_text(size = 12), panel.border = element_rect(colour = "grey20", fill = NA, linewidth = 0.55))
 pA2 <- pA + coord_cartesian(clip = "off") + theme(panel.grid.major.x = element_line(colour = "grey80", linewidth = 0.4, linetype = "dashed")) + theme(axis.title.y = element_text(size = 12), plot.margin = margin(2, 5.5, 5.5, 5.5))
-pS$layers <- c(if(!is.null(pop_pts)) list(geom_jitter(data = pop_pts[pop_pts$share <= 85, ], aes(x = xa, y = share), inherit.aes = FALSE, width = 0.28, height = 0, colour = "grey35", alpha = 0.35, size = 0.5)), pS$layers)
-pA2$layers <- c(if(!is.null(pop_pts)) list(geom_jitter(data = pop_pts[pop_pts$change >= -45 & pop_pts$change <= 15, ], aes(x = xa, y = change), inherit.aes = FALSE, width = 0.28, height = 0, colour = "grey35", alpha = 0.35, size = 0.5)), pA2$layers)
-pA2$layers <- pA2$layers[!vapply(pA2$layers, function(l) inherits(l$geom, "GeomText"), logical(1))]   # titles are drawn once, in the strip above
+pS$layers <- c(if(!is.null(pop_pts)) list(geom_jitter(data = pop_pts[pop_pts$share <= 85, ], aes(x = xa, y = share, colour = fit), inherit.aes = FALSE, width = 0.28, height = 0, alpha = 0.7, size = 0.7)), pS$layers)
+pA2$layers <- c(if(!is.null(pop_pts)) list(geom_jitter(data = pop_pts[pop_pts$change >= -45 & pop_pts$change <= 15, ], aes(x = xa, y = change, colour = fit), inherit.aes = FALSE, width = 0.28, height = 0, alpha = 0.7, size = 0.7)), pA2$layers)
+if(STRIPS) pA2$layers <- pA2$layers[!vapply(pA2$layers, function(l) inherits(l$geom, "GeomText"), logical(1))]   # with strips the titles are drawn once, in the strip above
 pB <- pB + theme(axis.title.y = element_text(size = 12))
 pSB <- ggplot(Gb, aes(xl, share)) + geom_col(width = 0.7, fill = "grey55", colour = "grey15", linewidth = 0.3) +
   scale_y_continuous(limits = c(0, 62), breaks = c(0, 25, 50), labels = function(x) paste0(x, "%"), expand = c(0, 0)) + scale_x_discrete(expand = expansion(add = 0.6)) +
@@ -234,10 +244,79 @@ pSB <- ggplot(Gb, aes(xl, share)) + geom_col(width = 0.7, fill = "grey55", colou
   theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(), panel.grid.major.x = element_line(colour = "grey80", linewidth = 0.4, linetype = "dashed"),
         plot.margin = margin(12, 5.5, 0, 5.5), axis.title.y = element_text(size = 12), panel.border = element_rect(colour = "grey20", fill = NA, linewidth = 0.55))
 pB2 <- pB + theme(plot.margin = margin(2, 5.5, 5.5, 5.5))
-right <- (pSB / pB2) + plot_layout(heights = c(0.55, 1))
-left <- (pS / pA2) + plot_layout(heights = c(0.55, 1))
-fig <- (wrap_elements(full = left) + wrap_elements(full = right) + plot_layout(widths = c(1, 1))) + plot_annotation(tag_levels = list(c("A", "B"))) & theme(plot.tag = element_text(face = "bold", size = 23), plot.tag.position = c(0.01, 0.99))
+if(STRIPS){   # two rows per side: share of the remaining NLL (strip) above the change from baseline
+  right <- (pSB / pB2) + plot_layout(heights = c(0.55, 1))
+  left <- (pS / pA2) + plot_layout(heights = c(0.55, 1))
+  fig <- (wrap_elements(full = left) + wrap_elements(full = right) + plot_layout(widths = c(1, 1))) + plot_annotation(tag_levels = list(c("A", "B"))) & theme(plot.tag = element_text(face = "bold", size = 23), plot.tag.position = c(0.01, 0.99))
+  fig_h <- 5.2
+} else {     # one panel per side: A = change from baseline by species x type; B = that change allocated to parameter types
+  pA1 <- pA2 + theme(plot.margin = margin(14, 8, 5.5, 12)); pB1 <- pB2 + theme(plot.margin = margin(14, 8, 5.5, 8))
+  if(!is.null(pop_pts)){
+    # panel B (surrogate): a random forest on ALL evaluated parameter sets predicts the total NLL; for every final-population model the parameters of one type are
+    # set back to the baseline values and the model is predicted again. Effect of the type = predicted NLL as calibrated - predicted NLL with the type reverted
+    # (negative = the type's calibration lowered the NLL), as % of the baseline NLL of the full objective. One point per model and type, coloured by the model's NLL.
+    log_cols <- colnames(X)[vapply(colnames(X), function(j){ v <- e[[j]][ok]; min(v) > 0 && max(v) / min(v) > 20 }, logical(1))]
+    to_x <- function(M){ M <- as.data.frame(M[, colnames(X), drop = FALSE]); for(j in log_cols) M[[j]] <- log10(M[[j]]); M }
+    fit_all <- ranger(x = X, y = y, num.trees = 500, min.node.size = 5, seed = 1)
+    ord_f <- order(runs_f$fitness); Pf <- to_x(pop_f[runs_f$gapop_row[ord_f], ]); fit_f <- runs_f$fitness[ord_f]
+    base_x <- to_x(setNames(as.data.frame(t(par_tab$est_par_vec)), par_tab$par)); base_full <- e$fitness[e$role == "base"][1]
+    pred0 <- 10^predict(fit_all, Pf)$predictions
+    message("surrogate vs. actual NLL of the ", nrow(Pf), " final models: r = ", round(cor(pred0, fit_f), 2), "; baseline NLL ", round(base_full))
+    eff <- lapply(types, function(t){ cols <- names(grp)[grp == t]; Pr <- Pf; for(cn in cols) Pr[[cn]] <- base_x[[cn]]
+      100 * (pred0 - 10^predict(fit_all, Pr)$predictions) / base_full })
+    names(eff) <- types
+    spp <- do.call(rbind, lapply(types, function(t) data.frame(type = t, xl = Gb$xl[match(t, as.character(Gb$type))], y = eff[[t]], fit = fit_f, rank = seq_along(fit_f))))
+    write.csv(spp[, c("type", "rank", "fit", "y")], file.path(pr, "ts", "Fig_parameter_type_effect_surrogate.csv"), row.names = FALSE)
+    lo_y <- floor(min(quantile(spp$y, 0.005), na.rm = TRUE) / 5) * 5; hi_y <- 5
+    spp_in <- spp[is.finite(spp$y) & spp$y >= lo_y & spp$y <= hi_y, ]
+    # ---- supplement: table of the parameter types and validation of the surrogate (held-out evaluations) ----
+    tab_t <- data.frame(type = as.character(Gb$type), n_parameters = Gb$n, at_bound = Gb$edge, importance_share_pct = round(Gb$share, 1),
+      effect_best_pct = sapply(as.character(Gb$type), function(t) round(eff[[t]][1], 1)), effect_median_pct = sapply(as.character(Gb$type), function(t) round(median(eff[[t]], na.rm = TRUE), 1)),
+      effect_q10_pct = sapply(as.character(Gb$type), function(t) round(quantile(eff[[t]], 0.10, na.rm = TRUE), 1)), effect_q90_pct = sapply(as.character(Gb$type), function(t) round(quantile(eff[[t]], 0.90, na.rm = TRUE), 1)), row.names = NULL)
+    write.csv(tab_t, file.path(pr, "ts", "Table_parameter_types.csv"), row.names = FALSE); print(tab_t)
+    set.seed(2); te_v <- sample(seq_along(y), round(0.25 * length(y))); fit_v <- ranger(x = X[-te_v, ], y = y[-te_v], num.trees = 300, min.node.size = 5, seed = 2)
+    val <- data.frame(obs = 10^y[te_v], pred = 10^predict(fit_v, X[te_v, ])$predictions)
+    r2_v <- 1 - sum((log10(val$obs) - log10(val$pred))^2) / sum((log10(val$obs) - mean(log10(val$obs)))^2); gd <- val$obs < 8000; r_gd <- cor(val$pred[gd], val$obs[gd])
+    lim_v <- range(c(val$obs, val$pred)); write.csv(val, file.path(pr, "ts", "Fig_surrogate_validation.csv"), row.names = FALSE)
+    pV <- ggplot(val, aes(obs, pred)) + geom_abline(slope = 1, intercept = 0, linetype = "dashed") + geom_point(colour = "grey25", alpha = 0.35, size = 0.8) +
+      annotate("text", x = lim_v[1], y = lim_v[2], hjust = 0, vjust = 1, size = 4, lineheight = 1.05,
+               label = sprintf("Held-out R\u00b2 = %.2f (log10 NLL)\nr = %.2f for NLL < 8,000 (n = %d)", r2_v, r_gd, sum(gd))) +
+      scale_x_log10(limits = lim_v) + scale_y_log10(limits = lim_v) + coord_fixed() + labs(x = "Simulated NLL", y = "Surrogate-predicted NLL") + th
+    ggsave(file.path(pr, "ts", "Fig_surrogate_validation.png"), pV, width = 4.2, height = 4.2, dpi = 300, bg = "white")
+    message("surrogate validation: held-out R2 = ", round(r2_v, 2), ", r (NLL < 8000) = ", round(r_gd, 2))
+    spp_in <- spp_in[order(-spp_in$fit), ]   # worst first, lowest NLL on top
+    pB1$layers <- pB1$layers[!vapply(pB1$layers, function(l) inherits(l$geom, "GeomPoint") || inherits(l$geom, "GeomText"), logical(1))]   # drop the allocation dot and the bound counts (re-added higher, above the points)
+    pB1 <- pB1 + geom_text(data = Gb, aes(x = xe, y = 10, label = edge), inherit.aes = FALSE, hjust = 0, size = 4.3, colour = "#C0392B", fontface = "bold") +
+      geom_text(data = Gb, aes(x = xn, y = 10, label = paste0("/", n)), inherit.aes = FALSE, hjust = 0, size = 4.3, colour = "black")
+    # B shows only what the surrogate supports: the ranking and rough size of each type's effect (best model = dot; median and 10th-90th percentile of the 370 final models = square and line)
+    summ <- data.frame(xl = Gb$xl, med = sapply(as.character(Gb$type), function(t) median(eff[[t]], na.rm = TRUE)),
+                       q10 = sapply(as.character(Gb$type), function(t) quantile(eff[[t]], 0.10, na.rm = TRUE)), q90 = sapply(as.character(Gb$type), function(t) quantile(eff[[t]], 0.90, na.rm = TRUE)),
+                       best = sapply(as.character(Gb$type), function(t) eff[[t]][1]))
+    lo_y <- floor(min(summ$q10, summ$best) / 10) * 10
+    pB1 <- pB1 + geom_linerange(data = summ, aes(x = xl, ymin = q10, ymax = q90), inherit.aes = FALSE, colour = "grey35", linewidth = 1.3) +
+      geom_point(data = summ, aes(x = xl, y = med), inherit.aes = FALSE, shape = 22, fill = "white", colour = "grey15", size = 2.4, stroke = 0.5) +
+      geom_point(data = summ, aes(x = xl, y = best), inherit.aes = FALSE, fill = col_best, colour = "grey15", shape = 21, size = 2.6, stroke = 0.4) +
+      scale_y_continuous(labels = function(x) paste0(x, "%"), breaks = seq(lo_y, 0, 10), expand = c(0, 0)) + coord_cartesian(ylim = c(lo_y - 3, 13), clip = "off") +
+      labs(y = "Estimated effect of the type\n(% of baseline NLL)")
+    pA1 <- pA1 + fit_scale
+  }
+  drop_eb <- function(pp){ pp$layers <- pp$layers[!vapply(pp$layers, function(l) inherits(l$geom, "GeomErrorbar"), logical(1))]; pp }   # no ensemble range bars: the coloured points show the spread
+  pA1 <- drop_eb(pA1); pB1 <- drop_eb(pB1)
+  if(!is.null(pop_pts)){   # NLL colour bar as a third panel with the same top / bottom space as A and B, so it spans exactly the panel height
+    pBar <- ggplot(data.frame(y = seq(lo_f, hi_f, length.out = 200)), aes(0, y, fill = y)) + geom_raster() +
+      scale_fill_viridis_c(option = "plasma", direction = -1, limits = c(lo_f, hi_f), guide = "none") +
+      scale_x_continuous(limits = c(-0.5, 0.5), breaks = 0, labels = "X\nX", expand = c(0, 0)) +
+      scale_y_continuous(position = "right", breaks = fit_brk, labels = function(x) format(round(x), big.mark = ""), expand = c(0, 0)) +
+      coord_cartesian(clip = "off") + labs(x = NULL, y = "NLL") + th +
+      theme(panel.grid = element_blank(), panel.border = element_rect(colour = "grey20", fill = NA, linewidth = 0.55),
+            axis.text.x = element_text(size = 10.7, colour = NA, lineheight = 0.9), axis.ticks.x = element_line(colour = NA),
+            axis.title.y.right = element_text(size = 12, angle = 90), axis.title.y.left = element_blank(), plot.margin = margin(14, 30, 5.5, 8))
+    fig <- (pA1 + pBar + pB1 + plot_layout(widths = c(1, 0.07, 1))) + plot_annotation(tag_levels = list(c("A", "", "B"))) & theme(plot.tag = element_text(face = "bold", size = 23), plot.tag.position = c(0.01, 0.99))
+  } else
+  fig <- (pA1 + pB1 + plot_layout(widths = c(1, 1))) + plot_annotation(tag_levels = list(c("A", "B"))) & theme(plot.tag = element_text(face = "bold", size = 23), plot.tag.position = c(0.01, 0.99))
+  fig_h <- 3.6
+}
 f_pdf <- file.path(pr, "ts", paste0("Fig_contribution_of_components", tag, ".pdf")); f_png <- sub("\\.pdf$", ".png", f_pdf)
-ggsave(f_pdf, fig, width = 9.5, height = 5.2, device = cairo_pdf)
+ggsave(f_pdf, fig, width = 9.5, height = fig_h, device = cairo_pdf)
 if(requireNamespace("pdftools", quietly = TRUE)){ pdftools::pdf_convert(f_pdf, format = "png", dpi = 300, filenames = f_png, verbose = FALSE)
-} else ggsave(f_png, fig, width = 9.5, height = 5.2, dpi = 300, bg = "white")
+} else ggsave(f_png, fig, width = 9.5, height = fig_h, dpi = 300, bg = "white")
