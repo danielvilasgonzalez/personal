@@ -29,8 +29,9 @@ for(d in file.path(PLOTS, c("ts", "spatial", "residuals", "response")))
 
 ## ---- SETTINGS THAT DEPEND ON THIS RUN ----------------------------------------------------------
 LAST_GEN <- 30      # last generation in ga_results (the old run used 27)
-# ensemble = the best ENS_PROP of the final population (lowest NLL), equal weights: 370 x 0.10 = 37 models.
-ENS_PROP <- 0.10
+# ensemble = the final-generation models with NLL at or below the ENS_PROP quantile of the final-generation NLL distribution
+# (0.8 -> 296 of 370 models), equal weights. Every ensemble figure below uses this cut; Fig_S_ensemble_threshold_sensitivity.png shows it does not drive the result.
+ENS_PROP <- 0.80
 
 # FALSE = only the figures used in the manuscript and its supplement. TRUE = also the extra
 # diagnostics (obs vs predicted for baseline and best, all-models time series, best-vs-mean figure,
@@ -234,7 +235,7 @@ if(EXTRA_PLOTS){
 # gag + red grouper together in one figure (3 columns x 4 rows, gag on top). The y-axis follows the observations (ylim_from_obs = TRUE)
 # because the worst candidates are far off scale; the colour scale is capped at the 95th percentile of the NLL.
 # Files: <Var>_ensemble_facet_<species>_quantile_<all|best80>.png and Biomass_ensemble_facet_gag_and_red_grouper_quantile_<all|best80>_both.png
-for(sel in list(list(q = 1, tag = "_all"), list(q = 0.8, tag = "_best80"))){
+for(sel in list(list(q = 1, tag = "_all"), list(q = ENS_PROP, tag = "_best80"))){
   facet_all_models <- plot_ga_ensemble_faceted(
     obs, ga_runs, init_run_dir = BASE_RUN, vars = c("Biomass", "Catch", "F"),
     species_patterns = c("gag", "red grouper"),
@@ -277,9 +278,12 @@ region_ts <- plot_region_timeseries_grid(
   domain_obs_pattern = "FWCNMFS", map_show_land = TRUE,
   extent_csv = file.path(BASE_RUN, "EcospaceMapBiomass-gag 0.csv"),
   show_ensemble = TRUE, ensemble_style = "ribbon",   # baseline (dashed) + mean of the best 80% of the final models + 90% interval (5th-95th percentile) per region; the map outlines the modelled area
-  ens_mode = "quantile", keep_fitness_quantile = 0.8, ribbon_probs = c(0.05, 0.95),   # best 80% of the final models (worst 20% removed)
+  ens_mode = "quantile", keep_fitness_quantile = ENS_PROP, ribbon_probs = c(0.05, 0.95),   # ensemble = NLL at or below the ENS_PROP quantile; band = 5th-95th percentile across members
   ensemble_max_folders = N_CAND, plots_dir = file.path(PLOTS, "ts"))
 print(table(region_ts$run, region_ts$region_id))   # an "init" row per region = baseline is drawn
+
+## ---- supplement: sensitivity of the ensemble band to the NLL-quantile cut-off ----
+local(source(file.path(REPO_DIR, "fig ensemble threshold sensitivity phase6.R"), local = TRUE))
 
 if(EXTRA_PLOTS){
   gen_summary <- plot_ga_generation_best(
