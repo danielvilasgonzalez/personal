@@ -12,17 +12,17 @@
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 ## ---- PATHS ---------------------------------------------------------------------------------
-RUN       <- "/Users/daniel/Work/ST_calibration/phase6_ga01"       # ONE folder: inputs/, output/, results/, sens1/, plots_R/
+RUN       <- Sys.getenv("EWE_RUN",  "/Users/daniel/Work/ST_calibration/phase6_ga01")       # ONE folder: inputs/, output/, results/, sens1/, plots_R/
 LABEL     <- "ga01"
-REPO_DIR  <- "/Users/daniel/Documents/GitHub/personal/EwE_ST_calibration"   # functions + masks
-OLD_BASE  <- "/Users/daniel/Work/ST_calibration"                   # only for maxn/ rasters (shared, top level)
+REPO_DIR  <- Sys.getenv("EWE_REPO", "/Users/daniel/Documents/GitHub/personal/EwE_ST_calibration")   # functions + masks
+OLD_BASE  <- Sys.getenv("EWE_BASE", "/Users/daniel/Work/ST_calibration")                   # only for maxn/ rasters (shared, top level)
 SENS_XLSX <- file.path(RUN, "sens1", "LL_rescored.xlsx")
 PARVEC    <- file.path(RUN, "results", "parvec_ga01.csv")           # per-parameter GA bounds
 
 FUNCTIONS_PATH <- file.path(REPO_DIR, "st_calibration_functions.R")
 DATA_DIR  <- file.path(RUN, "output/gen30_small")                  # the 370 candidate folders
 BASE_RUN  <- file.path(RUN, "output/run_base")                     # baseline model output
-MAXN_DIR  <- file.path(OLD_BASE, "maxn")                           # observed gag / red grouper rasters
+MAXN_DIR  <- Sys.getenv("EWE_MAXN", file.path(OLD_BASE, "maxn"))                           # observed gag / red grouper rasters
 PLOTS     <- file.path(RUN, "plots_R")                             # new folder: old figures untouched
 for(d in file.path(PLOTS, c("ts", "spatial", "residuals", "response")))
   if(!dir.exists(d)) dir.create(d, recursive = TRUE, showWarnings = FALSE)

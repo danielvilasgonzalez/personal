@@ -191,7 +191,7 @@ plot_nll_convergence_panel <- function(ga2, primary_col, primary_label, primary_
       sec.axis = ggplot2::sec_axis(~ (. - offs) / sf, name = sd_label)
     ) +
     ggplot2::labs(x = "generation") +
-    ggplot2::theme_bw(base_size = 12) +
+    .theme_bw(base_size = 12) +
     ggplot2::theme(
       axis.title = ggplot2::element_text(face = "bold"),
       axis.title.y.right = ggplot2::element_text(face = "bold"),
@@ -322,7 +322,7 @@ plot_nll_mean_median_max_panel <- function(ga2,
       sec.axis = ggplot2::sec_axis(~ (. - offs) / sf, name = max_label)
     ) +
     ggplot2::labs(x = "generation") +
-    ggplot2::theme_bw(base_size = 12) +
+    .theme_bw(base_size = 12) +
     ggplot2::theme(
       axis.title = ggplot2::element_text(face = "bold"),
       axis.title.y.right = ggplot2::element_text(face = "bold"),
@@ -869,7 +869,7 @@ plot_obs_vs_pred <- function(obs,
         } +
         ggplot2::labs(title = group_label, x = "Year", y = info$y_lab,
                       shape = "Observed series") +
-        ggplot2::theme_bw(base_size = 11) +
+        .theme_bw(base_size = 11) +
         ggplot2::theme(legend.position = "bottom",
                        legend.text = ggplot2::element_text(size = 7),
                        plot.title = ggplot2::element_text(size = 11, face = "bold"),
@@ -1534,7 +1534,7 @@ plot_ga_ensemble <- function(obs = NULL,
         } +
         ggplot2::labs(title = paste0(var, ": ", group_name),
                       x = "Year", y = info$y_lab, shape = "Observed series") +
-        ggplot2::theme_bw(base_size = 11) +
+        .theme_bw(base_size = 11) +
         ggplot2::theme(legend.position = "right",
                        legend.text = ggplot2::element_text(size = 7),
                        plot.title = ggplot2::element_text(size = 11, face = "bold"),
@@ -1637,6 +1637,10 @@ compare_best_vs_ensemble_mean <- function(ga_runs, vars = c("Biomass", "Catch", 
   if(!is.finite(hi) || hi <= lo) hi <- max(fitness)
   c(lo, hi)
 }
+# One panel border for every figure: grey20, 0.55 pt, the look of theme_bw(base_size = 12) (the GA-convergence NLL panels).
+# theme_bw() scales the border with base_size, so figures with different text sizes got different borders; this wrapper fixes it.
+.panel_border <- function() ggplot2::element_rect(colour = "grey20", fill = NA, linewidth = 0.55)
+.theme_bw <- function(...) ggplot2::theme_bw(...) + ggplot2::theme(panel.border = .panel_border())
 .nll_scale <- function(limits, palette = "magma", aes = c("colour", "fill"), guide = "none"){
   aes <- match.arg(aes)
   # low NLL (good) = light end, high NLL = dark; the light end is capped (end = 0.85) so the
@@ -1665,10 +1669,10 @@ compare_best_vs_ensemble_mean <- function(ga_runs, vars = c("Biomass", "Catch", 
                                                  l }) +
     ggplot2::coord_cartesian(ylim = limits) +
     ggplot2::labs(title = "NLL", x = "Year", y = NULL) +
-    ggplot2::theme_bw(base_size = base_size) +
+    .theme_bw(base_size = base_size) +
     ggplot2::theme(
       panel.grid = ggplot2::element_blank(),
-      panel.border = ggplot2::element_rect(colour = "black", fill = NA, linewidth = 0.5),
+      panel.border = .panel_border(),
       plot.title = ggplot2::element_text(size = title_size, face = "bold", hjust = 0,
                                          margin = ggplot2::margin(0, 0, 4, 0)),
       # invisible placeholders that reserve exactly the same height as the panels' x axis
@@ -2055,7 +2059,7 @@ plot_ga_ensemble_faceted <- function(obs = NULL,
           # window, keeping every line's full data intact.
           ggplot2::coord_cartesian(ylim = c(y_min, y_max_plot)) +
           ggplot2::labs(title = gn, x = "Year", y = info$y_lab) +
-          ggplot2::theme_bw(base_size = 10 * text_scale) +
+          .theme_bw(base_size = 10 * text_scale) +
           ggplot2::theme(
             aspect.ratio = 1,
             panel.grid.major = ggplot2::element_line(colour = scales::alpha("grey25", 0.35),
@@ -2503,7 +2507,7 @@ plot_ga_generation_best <- function(obs = NULL,
           ggplot2::scale_y_continuous(expand = c(0, 0)) +
           ggplot2::coord_cartesian(ylim = c(y_min, y_max_plot)) +
           ggplot2::labs(title = gn, x = "Year", y = info$y_lab) +
-          ggplot2::theme_bw(base_size = 10) +
+          .theme_bw(base_size = 10) +
           ggplot2::theme(
             aspect.ratio = 1,
             panel.grid.major = ggplot2::element_line(colour = scales::alpha("grey25", 0.35),
@@ -2768,7 +2772,7 @@ plot_rrmse_vs_fitness <- function(rrmse_df,
     ggplot2::scale_color_viridis_c(trans = "log10", name = "NLL") +
     ggplot2::facet_wrap(stats::as.formula(paste0("~", facet_by)), scales = "free_y", ncol = facet_ncol) +
     ggplot2::labs(x = "Fitness (NLL, log scale)", y = "RRMSE") +
-    ggplot2::theme_bw(base_size = 11) +
+    .theme_bw(base_size = 11) +
     ggplot2::theme(strip.text = ggplot2::element_text(size = 7, face = "bold"), aspect.ratio = 1)
   
   if(!dir.exists(plots_dir)) dir.create(plots_dir, recursive = TRUE, showWarnings = FALSE)
@@ -3106,7 +3110,7 @@ plot_spatial_residuals <- function(residual_df, title = "", value_col = c("resid
     ggplot2::scale_y_continuous(breaks = lat_breaks, expand = c(0, 0)) +
     ggplot2::coord_quickmap() +
     ggplot2::labs(title = if(title_inside) NULL else title, x = "Longitude", y = "Latitude") +
-    ggplot2::theme_bw(base_size = base_size) +
+    .theme_bw(base_size = base_size) +
     ggplot2::theme(
       panel.grid = ggplot2::element_blank(),
       # same recalibrated constants as plot_ecospace_map() -- see that function's
@@ -3724,7 +3728,7 @@ plot_region_map <- function(region_mask, region_attributes = NULL, title = "",
     ggplot2::labs(title = title, x = "Longitude", y = "Latitude", fill = "Region") +
     ggplot2::scale_x_continuous(expand = c(0, 0)) +
     ggplot2::scale_y_continuous(expand = c(0, 0)) +
-    ggplot2::theme_bw(base_size = base_size) +
+    .theme_bw(base_size = base_size) +
     ggplot2::theme(panel.grid = ggplot2::element_blank(),
                    # size/margin/vjust now MATCH the region panel title convention
                    # (previously 1.4x here vs 1.05x there) -- that size mismatch is the
@@ -4153,7 +4157,7 @@ plot_region_timeseries_grid <- function(run_dir = NULL, init_run_dir = NULL, gro
     if(nlevels(sub_obs$series) > 0)
       pp <- pp + ggplot2::scale_shape_manual(values = rep(0:25, length.out = nlevels(sub_obs$series)))
     pp <- pp + ggplot2::labs(title = lbl, x = "Year", y = "Biomass (t)", shape = "Observed")
-    pp <- pp + ggplot2::theme_bw(base_size = base_size)
+    pp <- pp + .theme_bw(base_size = base_size)
     pp <- pp + ggplot2::theme(plot.title = ggplot2::element_text(size = base_size * 1.05, face = "bold",
                                                                  color = if(use_lines) this_color else "black", margin = ggplot2::margin(b = 0),
                                                                  vjust = 0.2),
@@ -4453,7 +4457,7 @@ plot_region_timeseries_grid <- function(run_dir = NULL, init_run_dir = NULL, gro
     pp <- pp + ggplot2::scale_shape_manual(values = rep(0:25, length.out = nlevels(obs_df$series)))
   }
   pp <- pp + ggplot2::labs(title = "WFS", x = "Year", y = "Biomass (t)", shape = "Observed")
-  pp <- pp + ggplot2::theme_bw(base_size = base_size)
+  pp <- pp + .theme_bw(base_size = base_size)
   pp <- pp + ggplot2::theme(plot.title = ggplot2::element_text(size = base_size * 0.95, face = "bold",
                                                                hjust = 0.5, margin = ggplot2::margin(b = 0),
                                                                vjust = 0.2),
@@ -5256,7 +5260,7 @@ plot_ecospace_map <- function(map_summary, title = "", value_lab = "Value", log_
       x = "Longitude",
       y = "Latitude"
     ) +
-    ggplot2::theme_bw(
+    .theme_bw(
       base_size = base_size
     ) +
     ggplot2::theme(
@@ -6866,7 +6870,7 @@ plot_ecospace_ensemble_m0 <- function(map_root_dir,
             M0~(year^{-1})
           )
         ) +
-        ggplot2::theme_bw(
+        .theme_bw(
           base_size = 12
         ) +
         ggplot2::theme(
@@ -7019,7 +7023,7 @@ plot_ecospace_ensemble_m0 <- function(map_root_dir,
             M0~(year^{-1})
           )
         ) +
-        ggplot2::theme_bw(
+        .theme_bw(
           base_size = 11
         ) +
         ggplot2::theme(
@@ -8026,7 +8030,7 @@ plot_ga_final_pop_distributions <- function(gapop_final, gapop_init, ga_runs,
           x = x_lab,
           y = NULL
         ) +
-        ggplot2::theme_bw(
+        .theme_bw(
           base_size = base_size
         ) +
         title_theme +
@@ -8527,7 +8531,7 @@ plot_ga_final_pop_distributions <- function(gapop_final, gapop_init, ga_runs,
             )
           )
       } +
-      ggplot2::theme_bw(
+      .theme_bw(
         base_size = base_size
       ) +
       title_theme +
@@ -9021,7 +9025,7 @@ plot_ga_response_curves <- function(ga_runs, group_index,
     } +
     ggplot2::labs(title = paste0(group_display, " -- ", driver_txt),
                   x = driver_txt, y = "Relative response") +
-    ggplot2::theme_bw(base_size = 11) +
+    .theme_bw(base_size = 11) +
     ggplot2::theme(plot.title = ggplot2::element_text(size = 11, face = "bold"))
   
   if(is.null(png_file)) png_file <- paste0("response_curves_", safe_name(group_display), ".png")
@@ -9193,7 +9197,7 @@ find_response_group_index <- function(ga_runs, group_name_pattern, max_check = 5
         ggplot2::geom_line(data = res, ggplot2::aes(x = x, y = y), color = "black", linewidth = 1.1) +
         ggplot2::labs(title = paste0(panel_names[k], " -- ", driver_txt, " (fixed)"),
                       x = driver_txt, y = "Relative response") +
-        ggplot2::theme_bw(base_size = 11) +
+        .theme_bw(base_size = 11) +
         ggplot2::theme(plot.title = ggplot2::element_text(size = 10, face = "bold"), aspect.ratio = 1)
       panels[[key]] <- pp
       panel_is_fixed[key] <- TRUE
@@ -9227,7 +9231,7 @@ find_response_group_index <- function(ga_runs, group_name_pattern, max_check = 5
       ggplot2::geom_line(data = best_df, ggplot2::aes(x = x, y = y), color = "black", linewidth = 1.1) +
       ggplot2::labs(title = paste0(panel_names[k], " -- ", driver_txt),
                     x = driver_txt, y = "Relative response") +
-      ggplot2::theme_bw(base_size = 11) +
+      .theme_bw(base_size = 11) +
       ggplot2::theme(plot.title = ggplot2::element_text(size = 10, face = "bold"), aspect.ratio = 1) +
       # suppressed on every panel by default -- re-enabled on just the LAST panel
       # below, so the NLL legend appears exactly once for the whole combined figure
@@ -9847,7 +9851,7 @@ plot_tested_vs_calibrated <- function(sens_xlsx, parvec, gapop_init, gapop_final
     ggplot2::scale_x_log10() +
     ggplot2::facet_grid(type ~ ., scales = "free", space = "free_y") +
     ggplot2::labs(x = "Parameter value (log scale); grey bar = GA search bounds", y = NULL) +
-    ggplot2::theme_bw(base_size = 9) + ggplot2::theme(legend.position = "bottom")
+    .theme_bw(base_size = 9) + ggplot2::theme(legend.position = "bottom")
   ggplot2::ggsave(file.path(plots_dir, png_file), p, width = 9, height = max(4, 0.17 * nrow(pd) + 1.5),
                   dpi = 200, units = "in", limitsize = FALSE)
   invisible(out)

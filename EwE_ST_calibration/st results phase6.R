@@ -25,11 +25,11 @@
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 #USER INPUT------------------------------------------------------------------------------------
-RUN      <- "/Users/daniel/Work/ST_calibration/phase6_ga01"
+RUN      <- Sys.getenv("EWE_RUN",  "/Users/daniel/Work/ST_calibration/phase6_ga01")
 LABEL    <- "ga01"
-REPO_DIR <- "/Users/daniel/Documents/GitHub/personal/EwE_ST_calibration"
-R4_DIR   <- "/Users/daniel/Documents/GitHub/R4EwE"                 # R4EwE source (or install the package)
-SDM_DIR  <- "/Users/daniel/Documents/GitHub/GFISHER/output/maps/GFISHER/5min/maxn_sdmTMB/mice"   # sdmTMB maps used by the GA
+REPO_DIR <- Sys.getenv("EWE_REPO", "/Users/daniel/Documents/GitHub/personal/EwE_ST_calibration")
+R4_DIR   <- Sys.getenv("EWE_R4",   "/Users/daniel/Documents/GitHub/R4EwE")                 # R4EwE source (or install the package)
+SDM_DIR  <- Sys.getenv("EWE_SDM",  "/Users/daniel/Documents/GitHub/GFISHER/output/maps/GFISHER/5min/maxn_sdmTMB/mice")   # sdmTMB maps used by the GA
 SPATIAL_WEIGHT <- 15
 N_ENS    <- 37                                       # ensemble = best 10% of the 370 candidates
 tol      <- 32.2973                                  # stop tolerance, ga_stop_ga01.csv

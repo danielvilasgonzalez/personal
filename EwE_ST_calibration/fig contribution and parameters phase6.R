@@ -20,7 +20,7 @@
 #---------------------------------------------------------------------------------------------------------------
 library(ggplot2); library(patchwork); library(ranger)
 
-RUN <- if(exists("RUN")) RUN else "/Users/daniel/Work/ST_calibration/phase6_ga01"   # uses RUN from the main script when sourced
+RUN <- if(exists("RUN")) RUN else Sys.getenv("EWE_RUN", "/Users/daniel/Work/ST_calibration/phase6_ga01")   # uses RUN from the main script when sourced
 EXCLUDE_STANZA_BIOMASS <- TRUE
 N_ENS <- 37                                    # ensemble = best 10% of the final population
 NREP  <- 15                                    # repeated random forests for the uncertainty of the shares
@@ -45,7 +45,7 @@ maps_gag <- c("gag 2-4", "gag 5+"); maps_red <- c("red grouper 3-4", "red groupe
 # palette from the manuscript figures: best model = turquoise
 col_best <- "#20B2AA"
 th <- theme_bw(base_size = 15) +
-  theme(strip.background = element_blank(), panel.grid.minor = element_blank(), panel.border = element_rect(colour = "black", fill = NA, linewidth = 0.7),
+  theme(strip.background = element_blank(), panel.grid.minor = element_blank(), panel.border = element_rect(colour = "grey20", fill = NA, linewidth = 0.55),
         axis.title = element_text(face = "bold"), axis.text = element_text(colour = "black"), legend.position = "none",
         panel.grid.major.y = element_line(colour = "grey90", linewidth = 0.4),
         panel.grid.major.x = element_line(colour = "grey80", linewidth = 0.4, linetype = "dashed"))
@@ -195,24 +195,44 @@ A2$share <- 100 * A2$best / sum(A2$best)
 mem_part <- function(sp, ty){ sel <- if(sp == "Gag") gag else red; if(ty == "Spatial") mem_sp(if(sp == "Gag") c("gag 2-4", "gag 5+") else c("red grouper 3-4", "red grouper 5+")) else mem_sum(sel, ty) }
 for(i in seq_len(nrow(A2))){ m <- 100 * mem_part(A2$species[i], A2$type[i]) / mem_gr; A2$sh_mean[i] <- mean(m); A2$sh_lo[i] <- min(m); A2$sh_hi[i] <- max(m) }
 write.csv(A2[, c("species", "part", "base", "best", "share", "best_p", "mean_p", "min_p", "max_p", "sh_mean", "sh_lo", "sh_hi")], file.path(pr, "ts", "Fig_contribution_A_best_ensemble.csv"), row.names = FALSE)
+# all candidates of the final population (grey points; written by section 3.1 of 'st results phase6.R'): same quantities as the ensemble
+f_ps <- file.path(pr, "discussion_checks", "06_population_series_matrix.csv"); f_pm <- file.path(pr, "discussion_checks", "06_population_maps.csv")
+pop_pts <- NULL
+if(file.exists(f_ps) && file.exists(f_pm)){
+  Ps <- read.csv(f_ps, check.names = FALSE); Pmp <- read.csv(f_pm, check.names = FALSE); Ps$rank <- NULL; Ps$fitness <- NULL; Pmp$rank <- NULL; Pmp$fitness <- NULL
+  sid_p <- sub("\\|.*$", "", names(Ps))
+  part_p <- function(sp, ty){ sel <- if(sp == "Gag") gag else red
+    if(ty == "Spatial") rowSums(Pmp[, if(sp == "Gag") maps_gag else maps_red, drop = FALSE]) else rowSums(Ps[, sid_p %in% ser$Title[sel & stype == ty], drop = FALSE]) }
+  vals <- sapply(seq_len(nrow(A2)), function(i) part_p(A2$species[i], A2$type[i]))     # models x (species, type)
+  tot_p <- rowSums(vals)
+  pop_pts <- do.call(rbind, lapply(seq_len(nrow(A2)), function(i) data.frame(xa = A2$xa[i], share = 100 * vals[, i] / tot_p,
+                                      change = 100 * (vals[, i] - A2$base[i]) / base_gr)))
+  pop_pts <- pop_pts[is.finite(pop_pts$share) & is.finite(pop_pts$change), ]
+  message("population points: ", nrow(pop_pts) / nrow(A2), " models; total NLL worse than baseline: ", sum(tot_p > base_gr, na.rm = TRUE))
+  write.csv(pop_pts, file.path(pr, "ts", "Fig_contribution_A_population.csv"), row.names = FALSE)
+}
+A2$base_share <- 100 * A2$base / sum(A2$base)     # baseline model, same basis as the strip
 col_sp <- c(Gag = "#3A9D5D", Red = "#C44E52"); A2$sp2 <- ifelse(A2$species == "Gag", "Gag", "Red")
 xs <- scale_x_continuous(breaks = as.vector(outer(1:2, (0:3) * 3, "+")), labels = rep(c("Gag", "Red"), 4), limits = c(0, 12), expand = c(0, 0))
 pS <- ggplot(A2, aes(xa, share, fill = sp2)) + geom_vline(xintercept = c(3, 6, 9), colour = "grey40") + geom_col(width = 0.8, colour = "grey15", linewidth = 0.3) +
+  geom_segment(aes(x = xa - 0.45, xend = xa + 0.45, y = base_share, yend = base_share), colour = "black", linewidth = 0.9, linetype = "21") +
   geom_linerange(aes(ymin = sh_lo, ymax = sh_hi), colour = "black", linewidth = 0.6) +
   annotate("text", x = (0:3) * 3 + 1.5, y = Inf, label = c("Biomass", "Catch", "F", "Spatial"), vjust = 1.4, fontface = "bold", size = 4.4) +
   scale_fill_manual(values = col_sp, guide = "none") + xs +
-  scale_y_continuous(limits = c(0, 70), breaks = c(0, 25, 50), labels = function(x) paste0(x, "%"), expand = c(0, 0)) +
+  scale_y_continuous(limits = c(0, 85), breaks = c(0, 25, 50), labels = function(x) paste0(x, "%"), expand = c(0, 0)) +
   labs(x = NULL, y = "Share of total\nNLL (%)") + th +
   coord_cartesian(clip = "off") +
-  theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(), panel.grid.major.x = element_line(colour = "grey80", linewidth = 0.4, linetype = "dashed"), plot.margin = margin(12, 5.5, 0, 12), axis.title.y = element_text(size = 12), panel.border = element_rect(colour = "black", fill = NA, linewidth = 0.7))
+  theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(), panel.grid.major.x = element_line(colour = "grey80", linewidth = 0.4, linetype = "dashed"), plot.margin = margin(12, 5.5, 0, 12), axis.title.y = element_text(size = 12), panel.border = element_rect(colour = "grey20", fill = NA, linewidth = 0.55))
 pA2 <- pA + coord_cartesian(clip = "off") + theme(panel.grid.major.x = element_line(colour = "grey80", linewidth = 0.4, linetype = "dashed")) + theme(axis.title.y = element_text(size = 12), plot.margin = margin(2, 5.5, 5.5, 5.5))
+pS$layers <- c(if(!is.null(pop_pts)) list(geom_jitter(data = pop_pts[pop_pts$share <= 85, ], aes(x = xa, y = share), inherit.aes = FALSE, width = 0.28, height = 0, colour = "grey35", alpha = 0.35, size = 0.5)), pS$layers)
+pA2$layers <- c(if(!is.null(pop_pts)) list(geom_jitter(data = pop_pts[pop_pts$change >= -45 & pop_pts$change <= 15, ], aes(x = xa, y = change), inherit.aes = FALSE, width = 0.28, height = 0, colour = "grey35", alpha = 0.35, size = 0.5)), pA2$layers)
 pA2$layers <- pA2$layers[!vapply(pA2$layers, function(l) inherits(l$geom, "GeomText"), logical(1))]   # titles are drawn once, in the strip above
 pB <- pB + theme(axis.title.y = element_text(size = 12))
 pSB <- ggplot(Gb, aes(xl, share)) + geom_col(width = 0.7, fill = "grey55", colour = "grey15", linewidth = 0.3) +
   scale_y_continuous(limits = c(0, 62), breaks = c(0, 25, 50), labels = function(x) paste0(x, "%"), expand = c(0, 0)) + scale_x_discrete(expand = expansion(add = 0.6)) +
   labs(x = NULL, y = "Share of NLL\nvariation (%)") + th + coord_cartesian(clip = "off") +
   theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(), panel.grid.major.x = element_line(colour = "grey80", linewidth = 0.4, linetype = "dashed"),
-        plot.margin = margin(12, 5.5, 0, 5.5), axis.title.y = element_text(size = 12), panel.border = element_rect(colour = "black", fill = NA, linewidth = 0.7))
+        plot.margin = margin(12, 5.5, 0, 5.5), axis.title.y = element_text(size = 12), panel.border = element_rect(colour = "grey20", fill = NA, linewidth = 0.55))
 pB2 <- pB + theme(plot.margin = margin(2, 5.5, 5.5, 5.5))
 right <- (pSB / pB2) + plot_layout(heights = c(0.55, 1))
 left <- (pS / pA2) + plot_layout(heights = c(0.55, 1))
