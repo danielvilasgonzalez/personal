@@ -84,6 +84,10 @@ ggsave(file.path(PLOTS, "ts/ga_convergence_nll.png"), plot = p_nll_combined,
 ## ---- 3. PARAMETER DISTRIBUTIONS (first vs. final population) -----------------------------------
 gapop_final <- read_ga_pop(file.path(RUN, "results", paste0("final_ga_pop", LABEL, ".csv")))
 gapop_init  <- read_ga_pop(file.path(RUN, "results", paste0("init_ga_pop",  LABEL, ".csv")))
+# the parameter distributions describe the ensemble: final-generation models with NLL at or below the ENS_PROP quantile
+ens_rows    <- ga_runs$gapop_row[ga_runs$fitness <= quantile(ga_runs$fitness, ENS_PROP, na.rm = TRUE)]
+gapop_final <- gapop_final[gapop_final$gapop_row %in% ens_rows, ]
+message("parameter distributions: ensemble of ", nrow(gapop_final), " of ", nrow(ga_runs), " final-generation models (NLL <= ", ENS_PROP, " quantile)")
 group_names <- get_region_output(0L, "Biomass", best_dir, new.env(parent = emptyenv()))$group_names
 
 gag_param_summary <- plot_ga_final_pop_distributions(
@@ -357,7 +361,7 @@ if(EXTRA_PLOTS){
   for(drv in c("depth", "temp", "red tide"))
     plot_ga_response_by_driver_map(
       ga_runs, driver_map, driver_name = drv, species_patterns = c("gag", "red grouper"),
-      keep_fitness_quantile = 0.9, max_folders = N_CAND, catalog = catalog,
+      keep_fitness_quantile = ENS_PROP, max_folders = N_CAND, catalog = catalog,
       plots_dir = file.path(PLOTS, "response"))
 
   rrmse_df  <- compute_rrmse_by_candidate(obs, ga_runs, vars = c("Biomass", "Catch", "F"),
