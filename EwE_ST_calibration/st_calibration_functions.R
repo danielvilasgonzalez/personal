@@ -4218,16 +4218,13 @@ plot_region_timeseries_grid <- function(run_dir = NULL, init_run_dir = NULL, gro
       if(!is.null(sub_ribbon) && nrow(sub_ribbon) > 0)
         pp <- pp + ggplot2::geom_ribbon(data = sub_ribbon,
                                         ggplot2::aes(x = year, ymin = pmax(lo, 0), ymax = hi),
-                                        fill = "grey50", alpha = 0.3, colour = NA)   # same styling as plot_ga_ensemble_faceted(): grey ensemble mean, black dashed baseline, teal dashed best model
+                                        fill = this_color, alpha = 0.25, colour = NA)   # uncertainty of the retained models, in the region colour
       if(nrow(sub_init) > 0)
         pp <- pp + ggplot2::geom_line(data = sub_init, ggplot2::aes(x = year, y = biomass_sum),
                                       color = "black", linewidth = 1.25, linetype = "22")
       if(exists("sub_best", inherits = FALSE) && !is.null(sub_best) && nrow(sub_best) > 0)
         pp <- pp + ggplot2::geom_line(data = sub_best, ggplot2::aes(x = year, y = biomass_sum),
-                                      color = "#20B2AA", linewidth = 1.25, linetype = "22")
-      if(nrow(sub_ens) > 0)
-        pp <- pp + ggplot2::geom_line(data = sub_ens, ggplot2::aes(x = year, y = biomass_sum),
-                                      color = "grey30", linewidth = 1.25)
+                                      color = this_color, linewidth = 1.8)   # best model: solid, region colour
     } else {
       if(nrow(sub_init) > 0)
         pp <- pp + ggplot2::geom_line(data = sub_init, ggplot2::aes(x = year, y = biomass_sum, linetype = "init"),
@@ -4527,9 +4524,10 @@ plot_region_timeseries_grid <- function(run_dir = NULL, init_run_dir = NULL, gro
                                       fill = "black", alpha = 0.20, colour = NA)
     if(nrow(sub_init) > 0)
       pp <- pp + ggplot2::geom_line(data = sub_init, ggplot2::aes(x = year, y = value),
-                                    color = "black", linewidth = 1.2, linetype = "22")
-    pp <- pp + ggplot2::geom_line(data = ens_mean_df, ggplot2::aes(x = year, y = value),
-                                  color = "black", linewidth = 1.8)
+                                    color = "black", linewidth = 1.25, linetype = "22")
+    if(nrow(sub_best) > 0)   # best model solid (domain-wide panel has no region colour -> black), same convention as the region panels
+      pp <- pp + ggplot2::geom_line(data = sub_best, ggplot2::aes(x = year, y = value),
+                                    color = "black", linewidth = 1.8)
   } else {
     if(nrow(sub_init) > 0)
       pp <- pp + ggplot2::geom_line(data = sub_init, ggplot2::aes(x = year, y = value, linetype = "init"),
