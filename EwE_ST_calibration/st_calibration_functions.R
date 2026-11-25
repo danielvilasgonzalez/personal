@@ -583,17 +583,29 @@ build_predicted_vector <- function(pool_codes, region_codes, var, pred_dir,
     pr <- get_region_output(r, var, pred_dir, cache)
     if(is.null(pr)){ missing_regions <- c(missing_regions, r); next }
     
-    pred_cols <- group_names_lookup(pr, pool_codes)
-    miss_cols <- setdiff(pred_cols, names(pr$data))
-    if(length(miss_cols) > 0){
-      message("  [missing] region ", r, " predicted ", var, " file has no column(s): ",
-              paste(miss_cols, collapse = ", "))
-      missing_regions <- c(missing_regions, r)
-      next
+    # Catch files are fleet x group columns ("fleet|group"), so the column position is NOT the
+    # pool code. Resolve the group name from the Biomass file (one column per group, in Ecopath
+    # order) and sum that group's catch over all fleets (same as R4EwE::fn.agg_catch_by_group).
+    fleet_cols <- grepl("\\|", names(pr$data))
+    if(any(fleet_cols)){
+      bref <- get_region_output(r, "Biomass", pred_dir, cache)
+      if(is.null(bref)){ missing_regions <- c(missing_regions, r); next }
+      gnm <- group_names_lookup(bref, pool_codes)
+      cols <- which(fleet_cols & sub("^.*\\|", "", names(pr$data)) %in% gnm)
+      v <- if(length(cols) == 0) rep(0, nrow(pr$data)) else
+        rowSums(pr$data[, cols, drop = FALSE], na.rm = TRUE)
+    } else {
+      pred_cols <- group_names_lookup(pr, pool_codes)
+      miss_cols <- setdiff(pred_cols, names(pr$data))
+      if(length(miss_cols) > 0){
+        message("  [missing] region ", r, " predicted ", var, " file has no column(s): ",
+                paste(miss_cols, collapse = ", "))
+        missing_regions <- c(missing_regions, r)
+        next
+      }
+      v <- if(length(pred_cols) == 1) pr$data[[pred_cols]] else
+        rowSums(pr$data[, pred_cols, drop = FALSE], na.rm = TRUE)
     }
-    
-    v <- if(length(pred_cols) == 1) pr$data[[pred_cols]] else
-      rowSums(pr$data[, pred_cols, drop = FALSE], na.rm = TRUE)
     
     if(is.null(total_vec)){
       years <- pr$data$year

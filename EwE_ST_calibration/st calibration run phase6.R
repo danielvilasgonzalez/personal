@@ -69,12 +69,12 @@ p_panel1 <- plot_nll_convergence_panel(ga2, "min_LL", "minimum NLL", "#0072B2",
                                        sd_color = "#D55E00",
                                        gen_breaks = seq(0, LAST_GEN, 5), sd_max = 1.2e5,
                                        primary_min = 6000,   # min_LL ranges ~6459-8550
-                                       baseline = baseline_NLL,   # dashed line; give its value in the caption
+                                       baseline = baseline_NLL, baseline_label = "Baseline, left axis",   # dashed line, labelled with its value
                                        legend_position = c(0.95, 0.80))
 p_panel2 <- plot_nll_mean_median_max_panel(ga2,
                                            mean_color = "#009E73", median_color = "#6A3D9A",
                                            max_color = "#CC79A7", gen_breaks = seq(0, LAST_GEN, 5),
-                                           baseline = baseline_NLL)
+                                           baseline = baseline_NLL, baseline_label = "Baseline, left axis")
 p_nll_combined <- p_panel1 + p_panel2
 p_nll_combined
 ggsave(file.path(PLOTS, "ts/ga_convergence_nll.png"), plot = p_nll_combined,
