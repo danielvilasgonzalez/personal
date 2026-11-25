@@ -120,6 +120,12 @@
   }
 }
 
+.baseline_text_colors <- function(baseline, lims){
+  b <- .breaks_with_baseline(baseline)(lims)
+  if(is.null(baseline) || !is.finite(baseline)) return("black")
+  ifelse(abs(b - baseline) < 1e-6 * max(1, abs(baseline)), "grey35", "black")
+}
+
 plot_nll_convergence_panel <- function(ga2, primary_col, primary_label, primary_color,
                                        sd_col = "sd_LL", sd_label = "sd NLL", sd_color = "#C0392B",
                                        sd_max = 150000, gen_breaks = NULL,
@@ -215,6 +221,8 @@ plot_nll_convergence_panel <- function(ga2, primary_col, primary_label, primary_
       axis.title = ggplot2::element_text(face = "bold"),
       axis.title.y.right = ggplot2::element_text(face = "bold"),
       axis.text = ggplot2::element_text(color = "black"),
+      axis.text.y = ggplot2::element_text(color = .baseline_text_colors(baseline, y_limits)),
+      axis.text.y.right = ggplot2::element_text(color = "black"),
       panel.grid.minor = ggplot2::element_blank(),
       legend.position = legend_position,
       legend.justification = legend_justification,
@@ -347,6 +355,8 @@ plot_nll_mean_median_max_panel <- function(ga2,
       axis.title = ggplot2::element_text(face = "bold"),
       axis.title.y.right = ggplot2::element_text(face = "bold"),
       axis.text = ggplot2::element_text(color = "black"),
+      axis.text.y = ggplot2::element_text(color = .baseline_text_colors(baseline, y_limits)),
+      axis.text.y.right = ggplot2::element_text(color = "black"),
       panel.grid.minor = ggplot2::element_blank(),
       legend.position = legend_position,
       legend.justification = legend_justification,
@@ -4208,13 +4218,16 @@ plot_region_timeseries_grid <- function(run_dir = NULL, init_run_dir = NULL, gro
       if(!is.null(sub_ribbon) && nrow(sub_ribbon) > 0)
         pp <- pp + ggplot2::geom_ribbon(data = sub_ribbon,
                                         ggplot2::aes(x = year, ymin = pmax(lo, 0), ymax = hi),
-                                        fill = this_color, alpha = 0.25, colour = NA)
+                                        fill = "grey50", alpha = 0.3, colour = NA)   # same styling as plot_ga_ensemble_faceted(): grey ensemble mean, black dashed baseline, teal dashed best model
       if(nrow(sub_init) > 0)
         pp <- pp + ggplot2::geom_line(data = sub_init, ggplot2::aes(x = year, y = biomass_sum),
-                                      color = "black", linewidth = 1.2, linetype = "22")
+                                      color = "black", linewidth = 1.25, linetype = "22")
+      if(exists("sub_best", inherits = FALSE) && !is.null(sub_best) && nrow(sub_best) > 0)
+        pp <- pp + ggplot2::geom_line(data = sub_best, ggplot2::aes(x = year, y = biomass_sum),
+                                      color = "#20B2AA", linewidth = 1.25, linetype = "22")
       if(nrow(sub_ens) > 0)
         pp <- pp + ggplot2::geom_line(data = sub_ens, ggplot2::aes(x = year, y = biomass_sum),
-                                      color = this_color, linewidth = 1.8)
+                                      color = "grey30", linewidth = 1.25)
     } else {
       if(nrow(sub_init) > 0)
         pp <- pp + ggplot2::geom_line(data = sub_init, ggplot2::aes(x = year, y = biomass_sum, linetype = "init"),
@@ -4259,7 +4272,10 @@ plot_region_timeseries_grid <- function(run_dir = NULL, init_run_dir = NULL, gro
   # NO arrows/direction assignment -- this replaced an earlier radial/compass-arrow
   # design that turned out to be less readable in practice
   extent_mask <- if(!is.null(extent_csv) && file.exists(extent_csv)) .extent_mask_from_map_csv(extent_csv) else NULL
-  map_panel <- plot_region_map(region_mask, region_attributes, title = paste0(group_token, " survey regions"), extent_mask = extent_mask,
+  shown_ids <- suppressWarnings(as.numeric(names(ts_panels))); shown_ids <- shown_ids[!is.na(shown_ids)]
+  map_mask <- region_mask   # the map only colours the regions that have a time-series panel; other survey regions are drawn as unsampled water
+  map_mask$value[!is.na(map_mask$value) & map_mask$value > 0 & !(map_mask$value %in% shown_ids)] <- 0
+  map_panel <- plot_region_map(map_mask, region_attributes, title = paste0(group_token, " survey regions"), extent_mask = extent_mask,
                                palette = map_palette, region_colors = region_colors,
                                show_land = map_show_land, fixed_aspect = map_fixed_aspect,
                                base_size = base_size)
