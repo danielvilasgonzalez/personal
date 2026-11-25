@@ -288,17 +288,14 @@ if(STRIPS){   # two rows per side: share of the remaining NLL (strip) above the 
     pB1$layers <- pB1$layers[!vapply(pB1$layers, function(l) inherits(l$geom, "GeomPoint") || inherits(l$geom, "GeomText"), logical(1))]   # drop the allocation dot and the bound counts (re-added higher, above the points)
     pB1 <- pB1 + geom_text(data = Gb, aes(x = xe, y = 10, label = edge), inherit.aes = FALSE, hjust = 0, size = 4.3, colour = "#C0392B", fontface = "bold") +
       geom_text(data = Gb, aes(x = xn, y = 10, label = paste0("/", n)), inherit.aes = FALSE, hjust = 0, size = 4.3, colour = "black")
-    # B shows only what the surrogate supports: the ranking and rough size of each type's effect (best model = dot; median and 10th-90th percentile of the 370 final models = square and line)
-    summ <- data.frame(xl = Gb$xl, med = sapply(as.character(Gb$type), function(t) median(eff[[t]], na.rm = TRUE)),
-                       q10 = sapply(as.character(Gb$type), function(t) quantile(eff[[t]], 0.10, na.rm = TRUE)), q90 = sapply(as.character(Gb$type), function(t) quantile(eff[[t]], 0.90, na.rm = TRUE)),
-                       best = sapply(as.character(Gb$type), function(t) eff[[t]][1]))
-    lo_y <- floor(min(summ$q10, summ$best) / 10) * 10
-    pB1 <- pB1 + geom_linerange(data = summ, aes(x = xl, ymin = q10, ymax = q90), inherit.aes = FALSE, colour = "grey35", linewidth = 1.3) +
-      geom_point(data = summ, aes(x = xl, y = med), inherit.aes = FALSE, shape = 22, fill = "white", colour = "grey15", size = 2.4, stroke = 0.5) +
-      geom_point(data = summ, aes(x = xl, y = best), inherit.aes = FALSE, fill = col_best, colour = "grey15", shape = 21, size = 2.6, stroke = 0.4) +
-      scale_y_continuous(labels = function(x) paste0(x, "%"), breaks = seq(lo_y, 0, 10), expand = c(0, 0)) + coord_cartesian(ylim = c(lo_y - 3, 13), clip = "off") +
+    # B: every final-population model (all 370) as one point per parameter type, coloured by its NLL (worst drawn first, lowest NLL on top); dot = best model
+    lo_y <- floor(min(quantile(spp$y, 0.005, na.rm = TRUE), eff[[1]][1]) / 10) * 10
+    spp_in <- spp[is.finite(spp$y) & spp$y >= lo_y & spp$y <= 6, ]; spp_in <- spp_in[order(-spp_in$fit), ]
+    pB1$layers <- c(list(geom_point(data = spp_in, aes(x = xl, y = y, colour = fit), inherit.aes = FALSE, size = 0.8, alpha = 0.7, position = position_jitter(width = 0.25, height = 0, seed = 1))), pB1$layers)
+    pB1 <- pB1 + geom_point(data = spp[spp$rank == 1, ], aes(x = xl, y = y), inherit.aes = FALSE, fill = col_best, colour = "grey15", shape = 21, size = 2.6, stroke = 0.4) +
+      scale_y_continuous(labels = function(x) paste0(x, "%"), breaks = seq(lo_y, 0, 10), expand = c(0, 0)) + coord_cartesian(ylim = c(lo_y - 3, 15), clip = "off") +
       labs(y = "Estimated effect of the type\n(% of baseline NLL)")
-    pA1 <- pA1 + fit_scale
+    pA1 <- pA1 + fit_scale; pB1 <- pB1 + fit_scale
   }
   drop_eb <- function(pp){ pp$layers <- pp$layers[!vapply(pp$layers, function(l) inherits(l$geom, "GeomErrorbar"), logical(1))]; pp }   # no ensemble range bars: the coloured points show the spread
   pA1 <- drop_eb(pA1); pB1 <- drop_eb(pB1)
@@ -310,8 +307,8 @@ if(STRIPS){   # two rows per side: share of the remaining NLL (strip) above the 
       coord_cartesian(clip = "off") + labs(x = NULL, y = "NLL") + th +
       theme(panel.grid = element_blank(), panel.border = element_rect(colour = "grey20", fill = NA, linewidth = 0.55),
             axis.text.x = element_text(size = 10.7, colour = NA, lineheight = 0.9), axis.ticks.x = element_line(colour = NA),
-            axis.title.y.right = element_text(size = 12, angle = 90), axis.title.y.left = element_blank(), plot.margin = margin(14, 30, 5.5, 8))
-    fig <- (pA1 + pBar + pB1 + plot_layout(widths = c(1, 0.07, 1))) + plot_annotation(tag_levels = list(c("A", "", "B"))) & theme(plot.tag = element_text(face = "bold", size = 23), plot.tag.position = c(0.01, 0.99))
+            axis.title.y.right = element_text(size = 12, angle = 90), axis.title.y.left = element_blank(), plot.margin = margin(14, 5.5, 5.5, 8))
+    fig <- (pA1 + pB1 + pBar + plot_layout(widths = c(1, 1, 0.06))) + plot_annotation(tag_levels = list(c("A", "B", ""))) & theme(plot.tag = element_text(face = "bold", size = 23), plot.tag.position = c(0.01, 0.99))
   } else
   fig <- (pA1 + pB1 + plot_layout(widths = c(1, 1))) + plot_annotation(tag_levels = list(c("A", "B"))) & theme(plot.tag = element_text(face = "bold", size = 23), plot.tag.position = c(0.01, 0.99))
   fig_h <- 3.6
@@ -320,3 +317,36 @@ f_pdf <- file.path(pr, "ts", paste0("Fig_contribution_of_components", tag, ".pdf
 ggsave(f_pdf, fig, width = 9.5, height = fig_h, device = cairo_pdf)
 if(requireNamespace("pdftools", quietly = TRUE)){ pdftools::pdf_convert(f_pdf, format = "png", dpi = 300, filenames = f_png, verbose = FALSE)
 } else ggsave(f_png, fig, width = 9.5, height = fig_h, dpi = 300, bg = "white")
+
+#---- supplement tables: (S-A) data series used in the calibration with their source; (S-B) the parameters that moved most, by type ------------------------------------
+# S-A: one row per series. The source is read from the series name (SEDAR assessment index / assessment output / catch); check the full survey names before submission.
+ser_all <- read.csv(file.path(pr, "nll_temporal_by_series.csv"), check.names = FALSE)
+raw_in <- read.csv(file.path(RUN, "inputs", "ts_mice_v5_discards_ecospace_regions_sedar105.csv"), header = FALSE, colClasses = "character", check.names = FALSE)
+ttl <- unlist(raw_in[raw_in[[1]] == "Title", -1]); wts <- suppressWarnings(as.numeric(raw_in[raw_in[[1]] == "Weight", -1])); names(wts) <- ttl
+body_in <- raw_in[suppressWarnings(!is.na(as.numeric(raw_in[[1]]))), ]; yrs_in <- as.numeric(body_in[[1]])
+yr_rng <- function(t){ v <- body_in[[which(raw_in[raw_in[[1]] == "Title", ] == t)[1]]]; ok <- !is.na(suppressWarnings(as.numeric(v))) & nzchar(v); if(any(ok)) paste(range(yrs_in[ok]), collapse = "-") else NA }
+f_bio <- file.path(RUN, "output", "run_base", "Ecospace_Annual_Average_Biomass.csv")
+grp_names <- if(file.exists(f_bio)){ l <- readLines(f_bio, warn = FALSE); gsub('"', "", strsplit(l[grep("^Year,", l)[1]], ",")[[1]][-1]) } else NULL
+src_of <- function(t) ifelse(grepl("SEDAR105", t), "SEDAR 105 gag age-0 index", ifelse(grepl("SEDAR72", t), "SEDAR 72 gag index (SRFS)", ifelse(grepl("SEDAR88", t), "SEDAR 88 red grouper index",
+          ifelse(grepl("SSrelCatch$", t), "Stock Synthesis catch (relative)", ifelse(grepl("^GAG_age", t), "Stock assessment output, gag (SEDAR 72)", ifelse(grepl("^REDGRP_age", t), "Stock assessment output, red grouper (SEDAR 88)", "other"))))))
+kind_of <- c(BiomassRel = "Relative biomass index", Catches = "Catch", CatchesRel = "Catch (relative)", FishingMortalityRef = "Fishing mortality (reference)")
+tabA <- data.frame(series = ser_all$Title, species = ifelse(grepl("^GAG", ser_all$Title), "Gag", ifelse(grepl("^REDGRP", ser_all$Title), "Red grouper", "Other group")),
+  group = if(is.null(grp_names)) ser_all$Poolcode else grp_names[ser_all$Poolcode], data_type = unname(kind_of[ser_all$Type.name]), source_from_series_name = src_of(ser_all$Title),
+  region = ser_all$Region, years = vapply(ser_all$Title, yr_rng, character(1)), n_years = ser_all$n, weight = round(wts[ser_all$Title], 2),
+  scored_in_figure = !is_stanza_bio(ser_all$Title), NLL_baseline = round(ser_all$loglik.baseline, 1), NLL_best = round(ser_all$loglik.best, 1), row.names = NULL)
+tabA <- tabA[order(tabA$species, tabA$data_type, tabA$series), ]
+write.csv(tabA, file.path(pr, "ts", "Table_S_data_sources.csv"), row.names = FALSE)
+
+# S-B: for the best model, the change of every parameter from its baseline value as a position within its search range (log scale when the range spans more than a factor of 20);
+# the five parameters that moved most in each type, with their random-forest importance
+posr <- function(v, j) if(lgb[j]) (log(v) - log(Lb[j])) / (log(Ub[j]) - log(Lb[j])) else (v - Lb[j]) / (Ub[j] - Lb[j])
+bi <- which.min(runs_f$fitness); best_par <- unlist(pop_f[runs_f$gapop_row[bi], par_tab$par]); base_par <- par_tab$est_par_vec
+pos_b <- sapply(seq_along(best_par), function(j) posr(best_par[j], j)); pos_0 <- sapply(seq_along(base_par), function(j) posr(base_par[j], j))
+chg <- data.frame(parameter = par_tab$par, type = unname(ptype[par_tab$par]), baseline = signif(base_par, 4), best = signif(best_par, 4), lower_bound = Lb, upper_bound = Ub,
+                  fold_change = ifelse(base_par > 0 & best_par > 0, round(best_par / base_par, 2), NA), shift_in_range_pct = round(100 * (pos_b - pos_0), 1),
+                  position_best_pct = round(100 * pos_b, 1), at_bound = pos_b < 0.05 | pos_b > 0.95, importance_pct = round(P$share[match(par_tab$par, P$par)], 2), row.names = NULL)
+tabB <- do.call(rbind, lapply(split(chg, chg$type), function(d) head(d[order(-abs(d$shift_in_range_pct)), ], 5)))
+tabB <- tabB[order(match(tabB$type, as.character(Gb$type)), -abs(tabB$shift_in_range_pct)), ]
+write.csv(tabB, file.path(pr, "ts", "Table_S_parameter_changes.csv"), row.names = FALSE)
+write.csv(chg[order(chg$type, -abs(chg$shift_in_range_pct)), ], file.path(pr, "ts", "Table_S_parameter_changes_all.csv"), row.names = FALSE)
+print(tabB)
