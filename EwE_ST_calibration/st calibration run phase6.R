@@ -272,14 +272,14 @@ best_vs_mean <- compare_best_vs_ensemble_mean(ga_runs, keep_fitness_quantile = E
 print(best_vs_mean)   # correlation, mean |% difference|, relative RMSE per stanza and variable
 write.csv(best_vs_mean, file.path(PLOTS, "ts", "best_vs_ensemble_mean.csv"), row.names = FALSE)
 
-# regions + WFS panel for gag age 0: baseline (black dashed), best (teal dashed) and all last-generation models (magma = NLL)
+# regions + WFS panel for gag age 0: baseline (black dashed), ensemble mean and the range of the 80% ensemble
 region_ts <- plot_region_timeseries_grid(
   ga_runs = ga_runs, species_pattern = "gag 0", init_run_dir = BASE_RUN,
   region_mask = age0_regions, region_attributes = region_attrs, obs = obs,
   domain_obs_pattern = "FWCNMFS", map_show_land = TRUE,
   extent_csv = file.path(BASE_RUN, "EcospaceMapBiomass-gag 0.csv"),
-  show_ensemble = TRUE, ensemble_style = "ribbon",   # baseline (dashed) + mean of the best 80% of the final models + 90% interval (5th-95th percentile) per region; the map outlines the modelled area
-  ens_mode = "quantile", keep_fitness_quantile = ENS_PROP, ribbon_probs = c(0.05, 0.95),   # ensemble = NLL at or below the ENS_PROP quantile; band = 5th-95th percentile across members
+  show_ensemble = TRUE, ensemble_style = "ribbon",   # baseline (dashed) + mean of the 80% ensemble + band spanning all ensemble members (minimum to maximum) per region; the map outlines the modelled area
+  ens_mode = "quantile", keep_fitness_quantile = ENS_PROP, ribbon_probs = c(0, 1),   # ensemble = NLL at or below the ENS_PROP quantile; band = range of all ensemble members (min to max)
   ensemble_max_folders = N_CAND, plots_dir = file.path(PLOTS, "ts"))
 print(table(region_ts$run, region_ts$region_id))   # an "init" row per region = baseline is drawn
 
