@@ -4244,9 +4244,9 @@ plot_region_timeseries_grid <- function(run_dir = NULL, init_run_dir = NULL, gro
       if(nrow(sub_init) > 0)
         pp <- pp + ggplot2::geom_line(data = sub_init, ggplot2::aes(x = year, y = biomass_sum),
                                       color = "black", linewidth = 1.25, linetype = "22")
-      if(exists("sub_best", inherits = FALSE) && !is.null(sub_best) && nrow(sub_best) > 0)
-        pp <- pp + ggplot2::geom_line(data = sub_best, ggplot2::aes(x = year, y = biomass_sum),
-                                      color = this_color, linewidth = 1.8)   # best model: solid, region colour
+      if(nrow(sub_ens) > 0)
+        pp <- pp + ggplot2::geom_line(data = sub_ens, ggplot2::aes(x = year, y = biomass_sum),
+                                      color = this_color, linewidth = 1.8)   # ensemble mean: solid, region colour
     } else {
       if(nrow(sub_init) > 0)
         pp <- pp + ggplot2::geom_line(data = sub_init, ggplot2::aes(x = year, y = biomass_sum, linetype = "init"),
@@ -4557,8 +4557,8 @@ plot_region_timeseries_grid <- function(run_dir = NULL, init_run_dir = NULL, gro
     if(nrow(sub_init) > 0)
       pp <- pp + ggplot2::geom_line(data = sub_init, ggplot2::aes(x = year, y = value),
                                     color = "black", linewidth = 1.25, linetype = "22")
-    if(nrow(sub_best) > 0)   # best model solid (domain-wide panel has no region colour -> black), same convention as the region panels
-      pp <- pp + ggplot2::geom_line(data = sub_best, ggplot2::aes(x = year, y = value),
+    if(nrow(ens_mean_df) > 0)   # ensemble mean solid (domain-wide panel has no region colour -> black), same convention as the region panels
+      pp <- pp + ggplot2::geom_line(data = ens_mean_df, ggplot2::aes(x = year, y = value),
                                     color = "black", linewidth = 1.8)
   } else {
     if(nrow(sub_init) > 0)
