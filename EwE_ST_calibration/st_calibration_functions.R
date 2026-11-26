@@ -3774,7 +3774,7 @@ aggregate_biomass_by_region <- function(run_dir, group_token, region_mask, cell_
 #' @export
 plot_region_map <- function(region_mask, region_attributes = NULL, title = "",
                             palette = "custom", region_colors = NULL,
-                            show_land = TRUE, fixed_aspect = FALSE, base_size = 11, outline_domain = TRUE, extent_mask = NULL){
+                            show_land = TRUE, fixed_aspect = FALSE, base_size = 11, outline_domain = TRUE, extent_mask = NULL, region_order = NULL){   # region_order: legend order of the regions (default alphabetical)
   if(!requireNamespace("ggplot2", quietly = TRUE))
     stop("Package 'ggplot2' is required. Install it with install.packages('ggplot2').")
   
@@ -3798,6 +3798,7 @@ plot_region_map <- function(region_mask, region_attributes = NULL, title = "",
     df <- df[is_region, , drop = FALSE]
   }
   region_levels <- sort(unique(df$region_label[!(df$region_label %in% c("Land", "Water (unsampled)"))]))
+  if(!is.null(region_order)) region_levels <- c(intersect(region_order, region_levels), setdiff(region_levels, region_order))
   df$region_label <- factor(df$region_label, levels = c(region_levels, "Water (unsampled)", "Land"))
   
   if(is.null(region_colors)) region_colors <- .region_color_palette(region_levels, palette)
@@ -4202,6 +4203,7 @@ plot_region_timeseries_grid <- function(run_dir = NULL, init_run_dir = NULL, gro
   # Set3's pale yellow (#FFFFB3) is low-contrast against a white background -- swap it
   # for a more visible amber/gold if it shows up in this palette
   region_colors[region_colors == "#FFFFB3"] <- "#E8A33D"
+  panel_region_order <- unique(agg$region_label[match(sort(regions_with_obs), agg$region_id)])   # legend of the map in the order of the time series panels
   
   ts_panels <- list()
   for(rid in sort(regions_with_obs)){
@@ -4301,7 +4303,7 @@ plot_region_timeseries_grid <- function(run_dir = NULL, init_run_dir = NULL, gro
   map_mask <- region_mask   # the map only colours the regions that have a time-series panel; other survey regions are drawn as unsampled water
   map_mask$value[!is.na(map_mask$value) & map_mask$value > 0 & !(map_mask$value %in% shown_ids)] <- 0
   map_panel <- plot_region_map(map_mask, region_attributes, title = paste0(group_token, " survey regions"), extent_mask = extent_mask,
-                               palette = map_palette, region_colors = region_colors,
+                               palette = map_palette, region_colors = region_colors, region_order = panel_region_order,
                                show_land = map_show_land, fixed_aspect = map_fixed_aspect,
                                base_size = base_size)
   map_panel <- map_panel + ggplot2::guides(fill = ggplot2::guide_legend(position = "inside"))

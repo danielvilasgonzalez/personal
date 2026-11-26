@@ -372,35 +372,42 @@ if (RUN_RESCORE) {
   # with weight > 0. Writes plots_R/ts/Fitted_series_rrmse.csv (read by "fig rrmse fitted series phase6.R").
   fit_rows <- which(th$Type %in% c(0, 1, 6, 61, 104) & !is.na(th$Weight) & th$Weight > 0)
   nm_ <- function(x) gsub("\\s+", "_", trimws(gsub('"', "", as.character(x))))
-  rrmse_all_dir <- function(d){
+  pred_all_dir <- function(d){   # predictions of every fitted series, rescaled by q like in the objective (years x series)
     regs <- r4(".detect_ecospace_regions")(d, "annual")
     bio <- r4("fn.read_pred_ecospace_wide")(d, "Biomass", "annual", regs, styear, aggregate_by_group = FALSE)
     cth <- r4("fn.read_pred_ecospace_wide")(d, "Catch", "annual", regs, styear, aggregate_by_group = TRUE)
     fmo <- r4(".derive_fmort_arr")(cth, bio, b.floor.frac = 1e-3, norm = nm_)
     rid <- as.integer(sub("R", "", dimnames(bio)[[3]])); r0 <- if(0L %in% rid) which(rid == 0L) else 1L
     gcol <- function(arr, pc) match(nm_(group.names[pc]), nm_(dimnames(arr)[[2]]))
-    vapply(fit_rows, function(j){
+    NAv <- rep(NA_real_, length(obs_yrs))
+    sapply(fit_rows, function(j){
       tc <- th$Type[j]; arr <- switch(as.character(tc), "0" = , "1" = bio, "6" = , "61" = cth, "104" = fmo)
-      if(is.null(arr)) return(NA_real_)
+      if(is.null(arr)) return(NAv)
       common <- match(obs_yrs, as.numeric(dimnames(arr)[[1]]))
       if(tc %in% c(0, 1)){
         pcs <- if("Poolcodes" %in% names(th)) th$Poolcodes[[j]] else integer(0); if(length(pcs) == 0) pcs <- as.integer(th$Poolcode[j])
         rg <- if("Regions" %in% names(th)) th$Regions[[j]] else integer(0); if(length(rg) == 0 && !is.na(th$Region[j])) rg <- as.integer(th$Region[j])
-        ri_ <- if(length(rg) == 0 || all(is.na(rg)) || any(rg == 0L)) r0 else match(rg, rid); if(anyNA(ri_)) return(NA_real_)
-        cols <- vapply(pcs, function(p) gcol(arr, p), integer(1)); if(length(cols) == 0 || anyNA(cols)) return(NA_real_)
+        ri_ <- if(length(rg) == 0 || all(is.na(rg)) || any(rg == 0L)) r0 else match(rg, rid); if(anyNA(ri_)) return(NAv)
+        cols <- vapply(pcs, function(p) gcol(arr, p), integer(1)); if(length(cols) == 0 || anyNA(cols)) return(NAv)
         w <- r4(".region_weights")(rid[ri_], region.areas); p <- rep(0, length(common))
         for(k in seq_along(ri_)){ sk <- rep(0, length(common)); for(ci in cols) sk <- sk + arr[, ci, ri_[k], 1][common]; p <- p + w[k] * sk }
         p <- p / sum(w)
       } else {
-        ri_ <- if(is.na(th$Region[j])) 1L else match(th$Region[j], rid); cl <- gcol(arr, th$Poolcode[j]); if(is.na(ri_) || is.na(cl)) return(NA_real_)
+        ri_ <- if(is.na(th$Region[j])) 1L else match(th$Region[j], rid); cl <- gcol(arr, th$Poolcode[j]); if(is.na(ri_) || is.na(cl)) return(NAv)
         p <- arr[, cl, ri_, 1][common]
       }
-      o <- obs.ts$ts[, j]; o[o <= 0] <- NA; ok <- !is.na(o) & !is.na(p) & p > 0; if(!any(ok)) return(NA_real_)
+      o <- obs.ts$ts[, j]; o[o <= 0] <- NA; ok <- !is.na(o) & !is.na(p) & p > 0; if(!any(ok)) return(NAv)
       q <- 1; if(!isTRUE(th$Absolute[j])) q <- mean(p[ok]) / mean(o[ok])
-      sqrt(mean((o[ok] - p[ok] / q)^2)) / mean(o[ok]) }, numeric(1))
+      p / q })
   }
-  RA <- sapply(dirs_rr, function(d) tryCatch(rrmse_all_dir(d), error = function(e) rep(NA_real_, length(fit_rows))))
-  rownames(RA) <- th$Title[fit_rows]; memA <- RA[, -1, drop = FALSE]
+  dirs_all <- c(base = file.path(run_dir, "output/run_base"),
+                setNames(vapply(runs$cmd_file, member_dir, character(1)), paste0("m", seq_len(nrow(runs)))))   # every final-generation model, best first
+  PA <- lapply(dirs_all, function(d) tryCatch(pred_all_dir(d), error = function(e) matrix(NA_real_, length(obs_yrs), length(fit_rows))))
+  OBS <- obs.ts$ts[, fit_rows, drop = FALSE]; OBS[OBS <= 0] <- NA
+  rr_mat <- function(Ps) sapply(seq_along(fit_rows), function(k){ o <- OBS[, k]; p <- Ps[, k]; ok <- !is.na(o) & !is.na(p)
+                                 if(!any(ok)) NA_real_ else sqrt(mean((o[ok] - p[ok])^2)) / mean(o[ok]) })
+  RA <- sapply(PA, rr_mat); rownames(RA) <- th$Title[fit_rows]
+  memA <- RA[, 2:(N_RR + 1), drop = FALSE]   # the ENS_PROP ensemble (members are sorted by NLL, m1 = best)
   fa <- data.frame(series = th$Title[fit_rows], type = th$Type.name[fit_rows], region = th$Region[fit_rows], weight = th$Weight[fit_rows],
                    rrmse_baseline = RA[, "base"], rrmse_best = RA[, "m1"], rrmse_ens_mean = rowMeans(memA, na.rm = TRUE),
                    rrmse_ens_min = apply(memA, 1, min, na.rm = TRUE), rrmse_ens_max = apply(memA, 1, max, na.rm = TRUE), n_members = N_RR)
@@ -410,6 +417,29 @@ if (RUN_RESCORE) {
       "| by the ensemble mean:", round(mean(fa$rrmse_ens_mean < fa$rrmse_baseline), 2), "\n")
   print(aggregate(cbind(rrmse_baseline, rrmse_best, rrmse_ens_mean) ~ type, fa, mean), digits = 3)
   write.csv(fa, file.path(run_dir, "plots_R", "ts", "Fitted_series_rrmse.csv"), row.names = FALSE)
+
+  # ---- 3.7 which NLL cut-off for the ensemble? coverage, band width and error of the ensemble mean for cut-offs from the best model alone to all 370 ----
+  # Members are the best k models (k from the quantile of the final-generation NLL). Coverage = share of fitted observations inside the min-max band;
+  # width = mean band width / mean observation; RRMSE of the ensemble mean (natural scale; "w_" = times the series weight). Writes plots_R/ts/Ensemble_cutoff_assessment.csv.
+  PAarr <- array(unlist(PA[-1]), dim = c(length(obs_yrs), length(fit_rows), length(PA) - 1))
+  fit_all <- runs$fitness; cut_p <- c(0, seq(0.1, 1, by = 0.1))
+  wts <- th$Weight[fit_rows]; typ <- th$Type.name[fit_rows]
+  one <- function(k){
+    sub <- PAarr[, , seq_len(k), drop = FALSE]
+    mn <- apply(sub, c(1, 2), mean, na.rm = TRUE); lo <- apply(sub, c(1, 2), min, na.rm = TRUE); hi <- apply(sub, c(1, 2), max, na.rm = TRUE)
+    lo[!is.finite(lo)] <- NA; hi[!is.finite(hi)] <- NA
+    cov_ <- sapply(seq_along(fit_rows), function(i){ ok <- !is.na(OBS[, i]) & !is.na(lo[, i]); if(!any(ok)) NA_real_ else mean(OBS[ok, i] >= lo[ok, i] & OBS[ok, i] <= hi[ok, i]) })
+    wid_ <- sapply(seq_along(fit_rows), function(i){ ok <- !is.na(OBS[, i]) & !is.na(lo[, i]); if(!any(ok)) NA_real_ else mean(hi[ok, i] - lo[ok, i]) / mean(OBS[ok, i]) })
+    data.frame(series = th$Title[fit_rows], type = typ, weight = wts, n_members = k, coverage = cov_, rel_width = wid_, rrmse_mean = rr_mat(mn)) }
+  cut_df <- do.call(rbind, lapply(cut_p, function(p){ k <- if(p == 0) 1 else sum(fit_all <= quantile(fit_all, p)); r <- one(k); r$cutoff <- p; r }))
+  cut_df <- cut_df[!is.na(cut_df$rrmse_mean), ]; cut_df$w_rrmse_mean <- cut_df$rrmse_mean * cut_df$weight
+  summ <- function(d) data.frame(n_members = d$n_members[1], n_series = nrow(d), coverage = mean(d$coverage, na.rm = TRUE), rel_width = mean(d$rel_width, na.rm = TRUE),
+                                 rrmse_mean = mean(d$rrmse_mean), w_rrmse_mean = mean(d$w_rrmse_mean), w_rrmse_mean_weighted = weighted.mean(d$rrmse_mean * d$weight, d$weight))
+  cut_out <- do.call(rbind, lapply(split(cut_df, cut_df$cutoff), function(d) rbind(cbind(cutoff = d$cutoff[1], group = "All series", summ(d)),
+                                   do.call(rbind, lapply(split(d, d$type), function(e) cbind(cutoff = e$cutoff[1], group = e$type[1], summ(e)))))))
+  print(round(cut_out[cut_out$group == "All series", c("cutoff", "n_members", "coverage", "rel_width", "rrmse_mean", "w_rrmse_mean")], 3), row.names = FALSE)
+  write.csv(cut_out, file.path(run_dir, "plots_R", "ts", "Ensemble_cutoff_assessment.csv"), row.names = FALSE)
+  write.csv(cut_df, file.path(run_dir, "plots_R", "ts", "Ensemble_cutoff_assessment_by_series.csv"), row.names = FALSE)
 }
 
 # ---- 4. run-to-run noise from parameter sets that the GA evaluated more than once -------------------------
