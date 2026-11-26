@@ -2,13 +2,13 @@
 # Figure: contribution of components to the fit (phase6 ga01), manuscript Fig. X
 #   A  composition of the best-model NLL (temporal vs spatial, species, type of series, focal maps)
 #   B  change in total NLL by species and type of series (biomass indices, catch, F, spatial), best model and ensemble range,
-#      as a percentage of the baseline NLL of the gag and red grouper data (46 scored series + four focal maps)
+#      as a percentage of the baseline NLL of the gag and red grouper data (55 fitted series + four focal maps)
 #   C  the same total change allocated to each type of parameter by its share of the NLL variation across the GA evaluations
 #      (random forest, grouped permutation importance; descriptive), with the parameters at a search bound out of all of each type
 #
-# The stanza biomass series (GAG_age1..6_biomass, REDGRP_age1..6_biomass) come from the stock assessments and are treated as
-# reference series: they are EXCLUDED here (EXCLUDE_STANZA_BIOMASS = TRUE). Set it to FALSE to get the full 58-series objective
-# that the GA actually minimized (baseline about 11,100, best 6,459); files then get the suffix _all58.
+# All 58 series with weight > 0 that the GA fitted are used (baseline about 11,100, best 6,459 with the spatial NLL). The 12 stanza
+# biomass series (GAG_age1..6_biomass, REDGRP_age1..6_biomass) come from the stock assessments; set EXCLUDE_STANZA_BIOMASS <- TRUE
+# to leave them out (46 series).
 #
 # Sourced from 'st calibration run phase6.R' (section 7) or run on its own. Needs ggplot2, patchwork, ranger (and pdftools for the PNG).
 # Inputs: plots_R/nll_temporal_by_series.csv, nll_spatial_by_map.csv (section 1 of 'st results phase6.R'),
@@ -22,11 +22,11 @@ library(ggplot2); library(patchwork); library(ranger)
 
 STRIPS <- if(exists("STRIPS")) STRIPS else FALSE   # TRUE: add the share-of-remaining-NLL strips above each panel (old layout)
 RUN <- if(exists("RUN")) RUN else Sys.getenv("EWE_RUN", "/Users/daniel/Work/ST_calibration/phase6_ga01")   # uses RUN from the main script when sourced
-EXCLUDE_STANZA_BIOMASS <- TRUE
+EXCLUDE_STANZA_BIOMASS <- FALSE   # FALSE: all 58 fitted series (the objective the GA minimised); TRUE: leave out the 12 stanza biomass series (46 series)
 N_ENS <- 37                                    # ensemble = best 10% of the final population
 NREP  <- 15                                    # repeated random forests for the uncertainty of the shares
 pr  <- file.path(RUN, "plots_R"); dir.create(file.path(pr, "ts"), showWarnings = FALSE, recursive = TRUE)
-tag <- if(EXCLUDE_STANZA_BIOMASS) "" else "_all58"
+tag <- ""   # same file names whichever set of series is used
 
 #---- data ---------------------------------------------------------------------------------------------------
 ser <- read.csv(file.path(pr, "nll_temporal_by_series.csv"), check.names = FALSE)
@@ -129,7 +129,7 @@ message("mean held-out R2 = ", round(r2, 2)); print(G)
 write.csv(G, file.path(pr, "ts", "Fig_parameter_type_E.csv"), row.names = FALSE)
 write.csv(P[order(-P$share), ], file.path(pr, "ts", "Fig_parameter_type_F_all_parameters.csv"), row.names = FALSE)
 
-# total change of the gag + red grouper data (46 series + four focal maps): best model and each ensemble member
+# total change of the gag + red grouper data (55 fitted series + four focal maps): best model and each ensemble member
 best_gr <- sum(A2$best)
 mem_gr <- Reduce(`+`, lapply(ptypes, function(ty) mem_sum(gag | red, ty))) + mem_sp(c(maps_gag, maps_red))
 tot_pct <- 100 * (c(best = best_gr, mean = mean(mem_gr), lo = min(mem_gr), hi = max(mem_gr)) - base_gr) / base_gr
@@ -164,7 +164,7 @@ pB <- ggplot(Gb, aes(xl)) + geom_hline(yintercept = 0, linetype = "dashed") +
   theme(plot.margin = margin(5.5, 5.5, 5.5, 5.5), axis.text.x = element_text(size = 10.7, colour = "black", lineheight = 0.9))
 
 #---- Fig. composition: what the best-model NLL is made of ------------------------------------------------------------
-# stacked bars, each row = 100% of the quantity named on the left (best model; the full objective: 46 series + all maps)
+# stacked bars, each row = 100% of the quantity named on the left (best model; the full objective: 58 series + all maps)
 sp_best_total <- { pt <- file.path(pr, "nll_partition_temporal_vs_spatial.csv"); if(file.exists(pt)) read.csv(pt)$spatial_NLL[read.csv(pt)$model == "best"] else NA_real_ }
 tb_best <- sum(ser$best)
 age0 <- grepl("_AGE0_", ser$Title) & gag
@@ -190,7 +190,7 @@ pComp <- ggplot(comp, aes(pct, row, fill = part)) + geom_col(width = 0.84, colou
   labs(x = "Share of the best-model NLL within each row", y = NULL) + th + theme(panel.grid = element_blank(), panel.border = element_blank(), plot.margin = margin(5.5, 14, 5.5, 5.5), axis.line.x = element_line(colour = "black"))
 comp$pct <- round(comp$pct, 1); write.csv(comp[, c("row", "part", "v", "pct")], file.path(pr, "ts", "Fig_composition_best_model.csv"), row.names = FALSE)
 #---- combine and save: A share of the best-model NLL (top strip) and change from baseline (below), by species and type; B change allocated to parameter types ----
-# share = best-model NLL of each species x type as a percentage of the best-model NLL of gag + red grouper (46 series + four focal maps; same basis as the change)
+# share = best-model NLL of each species x type as a percentage of the best-model NLL of gag + red grouper (55 fitted series + four focal maps; same basis as the change)
 A2$share <- 100 * A2$best / sum(A2$best)
 # ensemble: share of each member's own gag + red grouper NLL (best-model share = bar; ensemble mean = point; ensemble min-max = line)
 mem_part <- function(sp, ty){ sel <- if(sp == "Gag") gag else red; if(ty == "Spatial") mem_sp(if(sp == "Gag") c("gag 2-4", "gag 5+") else c("red grouper 3-4", "red grouper 5+")) else mem_sum(sel, ty) }

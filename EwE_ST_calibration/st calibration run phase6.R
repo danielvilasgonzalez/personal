@@ -370,7 +370,7 @@ if(EXTRA_PLOTS){
 
 ## ---- 7. CONTRIBUTION OF COMPONENTS (manuscript Fig. X) ------------------------------------------
 # Needs the output of sections 1 and 3.1 of "st results phase6.R" in plots_R/.
-# Stanza biomass series are reference series and are left out (set EXCLUDE_STANZA_BIOMASS in the script).
+# All 58 fitted series are used (set EXCLUDE_STANZA_BIOMASS <- TRUE in the script to leave out the 12 stanza biomass series).
 fig_needs <- file.path(PLOTS, c("nll_temporal_by_series.csv", "nll_spatial_by_map.csv",
                                 "nll_partition_temporal_vs_spatial.csv",
                                 file.path("discussion_checks", "06_member_series_nll.csv")))

@@ -331,8 +331,8 @@ if (RUN_RESCORE) {
   write.csv(mo, file.path(out_dir, "08_moran_residuals_best.csv"), row.names = FALSE)
   write.csv(dm, file.path(out_dir, "08_distribution_metrics_best.csv"), row.names = FALSE)
   # ---- 3.5 relative RMSE of the 12 stanza biomass series (gag and red grouper), baseline vs best vs members ----------
-  # These series come from the stock assessments, were part of the GA objective, and are left out of the partition in
-  # the contribution figure; the RRMSE is only a reference. Relative series are scaled by q = mean(pred) / mean(obs)
+  # These series come from the stock assessments and were part of the GA objective (like all 58 fitted series);
+  # the RRMSE below is a reference for them. Relative series are scaled by q = mean(pred) / mean(obs)
   # and RRMSE = rmse / mean(obs), as in the rest of the project. Writes plots_R/ts/Reference_stanza_biomass_rrmse.csv.
   th <- obs.ts$ts.head; j_all <- which(grepl("_age[1-6]_biomass$", th$Title))
   N_RR <- sum(runs$fitness <= quantile(runs$fitness, ENS_PROP))   # members of the ensemble (runs is sorted by fitness); m1 = best model
@@ -365,6 +365,51 @@ if (RUN_RESCORE) {
   print(round(rbind(Gag = agg(rr_out$species == "Gag"), Red = agg(rr_out$species != "Gag"), All = agg(rep(TRUE, nrow(rr_out))),
                     `Gag no stanza5+` = agg(rr_out$species == "Gag" & rr_out$stanza < 5)), 3))
   write.csv(rr_out, file.path(run_dir, "plots_R", "ts", "Reference_stanza_biomass_rrmse.csv"), row.names = FALSE)
+
+  # ---- 3.6 relative RMSE of EVERY fitted series (survey indices by region, biomass, catch, F), baseline vs best vs ensemble ----
+  # Same prediction extraction and q rescaling as fn.ecospace_objfxn (types 0/1 biomass summed over the stock's pool codes and
+  # area-weighted over regions, 6/61 catch, 104 F = catch / biomass); RRMSE = rmse / mean(obs) on the natural scale, only for series
+  # with weight > 0. Writes plots_R/ts/Fitted_series_rrmse.csv (read by "fig rrmse fitted series phase6.R").
+  fit_rows <- which(th$Type %in% c(0, 1, 6, 61, 104) & !is.na(th$Weight) & th$Weight > 0)
+  nm_ <- function(x) gsub("\\s+", "_", trimws(gsub('"', "", as.character(x))))
+  rrmse_all_dir <- function(d){
+    regs <- r4(".detect_ecospace_regions")(d, "annual")
+    bio <- r4("fn.read_pred_ecospace_wide")(d, "Biomass", "annual", regs, styear, aggregate_by_group = FALSE)
+    cth <- r4("fn.read_pred_ecospace_wide")(d, "Catch", "annual", regs, styear, aggregate_by_group = TRUE)
+    fmo <- r4(".derive_fmort_arr")(cth, bio, b.floor.frac = 1e-3, norm = nm_)
+    rid <- as.integer(sub("R", "", dimnames(bio)[[3]])); r0 <- if(0L %in% rid) which(rid == 0L) else 1L
+    gcol <- function(arr, pc) match(nm_(group.names[pc]), nm_(dimnames(arr)[[2]]))
+    vapply(fit_rows, function(j){
+      tc <- th$Type[j]; arr <- switch(as.character(tc), "0" = , "1" = bio, "6" = , "61" = cth, "104" = fmo)
+      if(is.null(arr)) return(NA_real_)
+      common <- match(obs_yrs, as.numeric(dimnames(arr)[[1]]))
+      if(tc %in% c(0, 1)){
+        pcs <- if("Poolcodes" %in% names(th)) th$Poolcodes[[j]] else integer(0); if(length(pcs) == 0) pcs <- as.integer(th$Poolcode[j])
+        rg <- if("Regions" %in% names(th)) th$Regions[[j]] else integer(0); if(length(rg) == 0 && !is.na(th$Region[j])) rg <- as.integer(th$Region[j])
+        ri_ <- if(length(rg) == 0 || all(is.na(rg)) || any(rg == 0L)) r0 else match(rg, rid); if(anyNA(ri_)) return(NA_real_)
+        cols <- vapply(pcs, function(p) gcol(arr, p), integer(1)); if(length(cols) == 0 || anyNA(cols)) return(NA_real_)
+        w <- r4(".region_weights")(rid[ri_], region.areas); p <- rep(0, length(common))
+        for(k in seq_along(ri_)){ sk <- rep(0, length(common)); for(ci in cols) sk <- sk + arr[, ci, ri_[k], 1][common]; p <- p + w[k] * sk }
+        p <- p / sum(w)
+      } else {
+        ri_ <- if(is.na(th$Region[j])) 1L else match(th$Region[j], rid); cl <- gcol(arr, th$Poolcode[j]); if(is.na(ri_) || is.na(cl)) return(NA_real_)
+        p <- arr[, cl, ri_, 1][common]
+      }
+      o <- obs.ts$ts[, j]; o[o <= 0] <- NA; ok <- !is.na(o) & !is.na(p) & p > 0; if(!any(ok)) return(NA_real_)
+      q <- 1; if(!isTRUE(th$Absolute[j])) q <- mean(p[ok]) / mean(o[ok])
+      sqrt(mean((o[ok] - p[ok] / q)^2)) / mean(o[ok]) }, numeric(1))
+  }
+  RA <- sapply(dirs_rr, function(d) tryCatch(rrmse_all_dir(d), error = function(e) rep(NA_real_, length(fit_rows))))
+  rownames(RA) <- th$Title[fit_rows]; memA <- RA[, -1, drop = FALSE]
+  fa <- data.frame(series = th$Title[fit_rows], type = th$Type.name[fit_rows], region = th$Region[fit_rows], weight = th$Weight[fit_rows],
+                   rrmse_baseline = RA[, "base"], rrmse_best = RA[, "m1"], rrmse_ens_mean = rowMeans(memA, na.rm = TRUE),
+                   rrmse_ens_min = apply(memA, 1, min, na.rm = TRUE), rrmse_ens_max = apply(memA, 1, max, na.rm = TRUE), n_members = N_RR)
+  fa$species <- ifelse(grepl("^GAG", fa$series, ignore.case = TRUE), "Gag", ifelse(grepl("^RED|^RGR", fa$series, ignore.case = TRUE), "Red grouper", "Other"))
+  fa <- fa[!is.na(fa$rrmse_baseline) & !is.na(fa$rrmse_best), ]
+  cat("\nFitted series with an RRMSE:", nrow(fa), "| share improved by the best model:", round(mean(fa$rrmse_best < fa$rrmse_baseline), 2),
+      "| by the ensemble mean:", round(mean(fa$rrmse_ens_mean < fa$rrmse_baseline), 2), "\n")
+  print(aggregate(cbind(rrmse_baseline, rrmse_best, rrmse_ens_mean) ~ type, fa, mean), digits = 3)
+  write.csv(fa, file.path(run_dir, "plots_R", "ts", "Fitted_series_rrmse.csv"), row.names = FALSE)
 }
 
 # ---- 4. run-to-run noise from parameter sets that the GA evaluated more than once -------------------------
