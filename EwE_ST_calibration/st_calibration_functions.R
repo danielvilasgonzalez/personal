@@ -3749,21 +3749,6 @@ aggregate_biomass_by_region <- function(run_dir, group_token, region_mask, cell_
              lon = top_lon + (col_idx - 1) * cellsize, value = vals)
 }
 
-# Real coastline (maps/mapdata worldHires) cropped to the panel limits, as polygons for geom_polygon; NULL if the packages are missing
-.land_polygons <- function(xlim, ylim){
-  if(!all(vapply(c("maps", "mapdata", "sf"), requireNamespace, logical(1), quietly = TRUE))) return(NULL)
-  suppressMessages(suppressWarnings(library(mapdata)))   # attaches the worldHires database used by maps::map()
-  s2 <- suppressMessages(sf::sf_use_s2(FALSE)); on.exit(suppressMessages(sf::sf_use_s2(s2)), add = TRUE)
-  m <- tryCatch(maps::map("worldHires", plot = FALSE, fill = TRUE, xlim = xlim + c(-1, 1), ylim = ylim + c(-1, 1)), error = function(e) NULL)
-  if(is.null(m)) return(NULL)
-  g <- tryCatch(suppressWarnings(suppressMessages({
-    x <- sf::st_make_valid(sf::st_as_sf(m)); sf::st_crop(sf::st_union(x), c(xmin = xlim[1], ymin = ylim[1], xmax = xlim[2], ymax = ylim[2]))})), error = function(e) NULL)
-  if(is.null(g) || length(g) == 0 || all(sf::st_is_empty(g))) return(NULL)
-  xy <- as.data.frame(sf::st_coordinates(sf::st_cast(sf::st_sf(geometry = g), "MULTIPOLYGON")))
-  xy$grp <- paste(xy$L1, xy$L3); xy
-}
-
-
 #' @title Plot a region-ID raster, colored/labeled by region name.
 #' @param region_mask Output of read_esri_ascii() (e.g. on age0_survey_regions_5min_mod.asc
 #'   or combined_regions_5min.asc).
@@ -3818,19 +3803,11 @@ plot_region_map <- function(region_mask, region_attributes = NULL, title = "",
   if(is.null(region_colors)) region_colors <- .region_color_palette(region_levels, palette)
   manual_extra <- c("Water (unsampled)" = "white", "Land" = "grey65")
   
-  land_poly <- NULL
-  if(show_land && outline_domain){   # actual coastline (not land cells of the grid); falls back to the grid cells if maps / mapdata / sf are missing
-    cs <- 0.08333334; ex <- 0.015
-    xr <- range(region_mask$lon) + c(-1, 1) * cs / 2; yr <- range(region_mask$lat) + c(-1, 1) * cs / 2
-    land_poly <- .land_polygons(xr + c(-1, 1) * ex * diff(xr), yr + c(-1, 1) * ex * diff(yr))
-    if(!is.null(land_poly)) df <- df[!is.na(df$region_label) & !(df$region_label %in% c("Land", "Water (unsampled)")), , drop = FALSE]
-  }
   p <- ggplot2::ggplot(df, ggplot2::aes(x = lon, y = lat, fill = region_label)) +
-    (if(is.null(land_poly)) NULL else ggplot2::geom_polygon(data = land_poly, ggplot2::aes(x = X, y = Y, group = grp, subgroup = L2), inherit.aes = FALSE, fill = "grey65", colour = NA)) +
     ggplot2::geom_raster() +
     ggplot2::labs(title = title, x = "Longitude", y = "Latitude", fill = "Region") +
-    ggplot2::scale_x_continuous(expand = if(outline_domain) ggplot2::expansion(mult = 0.015) else c(0, 0)) +
-    ggplot2::scale_y_continuous(expand = if(outline_domain) ggplot2::expansion(mult = 0.015) else c(0, 0)) +
+    ggplot2::scale_x_continuous(expand = c(0, 0)) +
+    ggplot2::scale_y_continuous(expand = c(0, 0)) +
     .theme_bw(base_size = base_size) +
     ggplot2::theme(panel.grid = ggplot2::element_blank(),
                    # size/margin/vjust now MATCH the region panel title convention
@@ -3864,7 +3841,7 @@ plot_region_map <- function(region_mask, region_attributes = NULL, title = "",
     }
   }
   if(outline_domain){   # contour of the modelled area (water cells of the mask), so the extent of the model is visible
-    seg <- .domain_outline_segments(region_mask, drop_grid_edge = !is.null(land_poly))
+    seg <- .domain_outline_segments(region_mask, drop_grid_edge = TRUE)
     p <- p + ggplot2::geom_segment(data = seg, ggplot2::aes(x = x, xend = xend, y = y, yend = yend), inherit.aes = FALSE,
                                    colour = if(is.null(extent_mask)) "black" else "grey45", linewidth = if(is.null(extent_mask)) 0.9 else 0.4, lineend = "round")
   }
@@ -4284,7 +4261,7 @@ plot_region_timeseries_grid <- function(run_dir = NULL, init_run_dir = NULL, gro
       pp <- pp + ggplot2::scale_shape_manual(values = rep(0:25, length.out = nlevels(sub_obs$series)))
     pp <- pp + ggplot2::labs(title = lbl, x = "Year", y = "Biomass (t)", shape = "Observed")
     pp <- pp + ggplot2::scale_y_continuous(limits = c(0, NA), expand = ggplot2::expansion(mult = c(0, 0.05)))   # every region panel starts at 0 at the bottom of the frame
-    pp <- pp + ggplot2::scale_x_continuous(expand = ggplot2::expansion(mult = c(0, 0.05)))   # x starts exactly at the first year (like y at 0), same in every region panel
+    pp <- pp + ggplot2::scale_x_continuous(expand = c(0, 0))   # x runs exactly from the first to the last year, same in every region panel
     pp <- pp + .theme_bw(base_size = base_size)
     pp <- pp + ggplot2::theme(plot.title = ggplot2::element_text(size = base_size * 1.05, face = "bold",
                                                                  color = if(use_lines) this_color else "black", margin = ggplot2::margin(b = 0),
@@ -4372,7 +4349,7 @@ plot_region_timeseries_grid <- function(run_dir = NULL, init_run_dir = NULL, gro
                                             show_ensemble = show_ensemble)
       pp_domain <- pp_domain + ggplot2::theme(plot.margin = ggplot2::margin(2, 2, 2, 2), aspect.ratio = 1)
       pp_domain <- pp_domain + ggplot2::scale_y_continuous(limits = c(0, NA), expand = ggplot2::expansion(mult = c(0, 0.05)))   # same 0 baseline as the region panels
-      pp_domain <- pp_domain + ggplot2::scale_x_continuous(expand = ggplot2::expansion(mult = c(0, 0.05)))
+      pp_domain <- pp_domain + ggplot2::scale_x_continuous(expand = c(0, 0))
       ordered_panels <- c(ordered_panels, list("WFS" = pp_domain))
     }
   }
