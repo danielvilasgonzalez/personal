@@ -382,7 +382,7 @@ if (RUN_RESCORE) {
   cache_pa <- file.path(out_dir, "06_pred_all_cache.rds")   # predictions of every model are cached: delete the file to read the output folders again
   if(file.exists(cache_pa) && identical(names(PA <- readRDS(cache_pa)), names(dirs_all))) message("predictions read from ", cache_pa) else {
     one_dir <- function(d) tryCatch(pred_all_dir(d), error = function(e) matrix(NA_real_, length(obs_yrs), length(fit_rows)))
-    nc <- if(.Platform$OS.type == "windows") 1L else max(1L, parallel::detectCores() - 1L)
+    nc <- if(.Platform$OS.type == "windows") 1L else (if(exists("N_CORES")) as.integer(N_CORES) else as.integer(Sys.getenv("EWE_CORES", "3")))   # cores: set N_CORES or EWE_CORES
     PA <- if(nc > 1L) parallel::mclapply(dirs_all, one_dir, mc.cores = nc) else lapply(dirs_all, one_dir)
     saveRDS(PA, cache_pa) }
   OBS <- obs.ts$ts[, fit_rows, drop = FALSE]; OBS[OBS <= 0] <- NA

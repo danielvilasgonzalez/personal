@@ -7,6 +7,7 @@
 # Set EXTRA_PLOTS <- TRUE in 'st calibration run phase6.R' to also get the diagnostic figures that are not in the manuscript.
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 REPO <- Sys.getenv("EWE_REPO", "/Users/daniel/Documents/GitHub/personal/EwE_ST_calibration")
+N_CORES <- 3L                                        # parallel cores; lower = cooler laptop, slower
 PRED_ONLY <- FALSE                                   # TRUE would skip the NLL re-scoring that the contribution figure needs
 t0 <- Sys.time()
 message("[1/2] st results phase6.R (NLL re-scoring, rRMSE of the 58 fitted series, cut-off assessment)")

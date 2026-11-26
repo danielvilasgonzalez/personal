@@ -38,6 +38,9 @@ ENS_PROP <- 0.80
 # generation-by-generation best, per-group red tide mortality, response functions by driver, RRMSE).
 EXTRA_PLOTS <- FALSE
 
+# cores used for the parallel steps (reading the 296 to 370 model folders). Fewer cores = slower but cooler laptop. Change here or set EWE_CORES.
+N_CORES <- if(exists("N_CORES")) N_CORES else as.integer(Sys.getenv("EWE_CORES", "3"))
+
 library(data.table); library(ggplot2); library(patchwork); library(scales)
 if(requireNamespace("RColorBrewer", quietly = TRUE)) library(RColorBrewer)
 source(FUNCTIONS_PATH)
@@ -297,7 +300,7 @@ map_root_dir <- DATA_DIR
 all_folders  <- list.dirs(map_root_dir, recursive = FALSE, full.names = TRUE)   # run_base is NOT in here
 message(length(all_folders), " candidate folders")
 n_cores_available <- if(.Platform$OS.type == "unix" && requireNamespace("parallel", quietly = TRUE))
-  max(1, parallel::detectCores() - 5) else 1
+  N_CORES else 1
 lon_breaks <- seq(-86, -82, by = 2); lat_breaks <- seq(26, 30, by = 2)
 
 ens_map_summary_aic <- plot_ecospace_ensemble_maps_paired(
