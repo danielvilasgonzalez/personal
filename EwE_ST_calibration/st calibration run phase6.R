@@ -380,4 +380,7 @@ if(all(file.exists(fig_needs))){
   message("Skipping section 7, missing: ", paste(basename(fig_needs[!file.exists(fig_needs)]), collapse = ", "))
 }
 
+## ---- 7b. FOUR-PANEL FIGURE: convergence (A, B) + contribution of data and parameter types (C, D) ----
+if(exists("contrib_panels")) local(source(file.path(REPO_DIR, "fig convergence and contribution phase6.R"), local = TRUE))
+
 message("Done. Figures are in ", PLOTS)

@@ -69,7 +69,7 @@ A2$xa <- (as.integer(A2$part) - 1) * 3 + ifelse(A2$species == "Gag", 0.85, 2.15)
 write.csv(A2, file.path(pr, "ts", "Fig_contribution_A_best_ensemble.csv"), row.names = FALSE)
 pA <- ggplot(A2, aes(xa)) + geom_hline(yintercept = 0, linetype = "dashed") + geom_vline(xintercept = c(3, 6, 9), colour = "grey30") +
   geom_errorbar(aes(ymin = min_p, ymax = max_p), colour = "black", width = 0.4, linewidth = 0.5) +
-  geom_point(aes(y = best_p), fill = col_best, colour = "grey15", shape = 21, size = 1.9, stroke = 0.4) +
+  geom_point(aes(y = best_p), fill = col_best, colour = "grey15", shape = 21, size = 2.6, stroke = 0.4) +
   annotate("text", x = (0:3) * 3 + 1.5, y = Inf, label = c("Biomass", "Catch", "F", "Spatial"), vjust = 1.4, fontface = "bold", size = 4.1) +
   scale_x_continuous(breaks = as.vector(outer(c(0.85, 2.15), (0:3) * 3, "+")), labels = rep(c("Gag", "Red"), 4), limits = c(0, 12), expand = c(0, 0)) +
   scale_y_continuous(labels = function(x) paste0(x, "%"), limits = c(-45, 15), breaks = seq(-40, 10, 10), expand = c(0, 0)) +
@@ -318,6 +318,7 @@ if(STRIPS){   # two rows per side: share of the remaining NLL (strip) above the 
   fig <- (pA1 + pB1 + plot_layout(widths = c(1, 1))) + plot_annotation(tag_levels = list(c("A", "B"))) & theme(plot.tag = element_text(face = "bold", size = 23), plot.tag.position = c(0.01, 0.99))
   fig_h <- 3.6
 }
+if(exists("pA1") && exists("pB1")) assign("contrib_panels", list(A = pA1, B = pB1, bar = if(exists("pBar")) pBar else NULL, lo = if(exists("lo_f")) lo_f else NA, hi = if(exists("hi_f")) hi_f else NA, brk = if(exists("fit_brk")) fit_brk else NULL), envir = globalenv())   # panels reused by the combined convergence + contribution figure
 f_pdf <- file.path(pr, "ts", paste0("Fig_contribution_of_components", tag, ".pdf")); f_png <- sub("\\.pdf$", ".png", f_pdf)
 ggsave(f_pdf, fig, width = 9.5, height = fig_h, device = cairo_pdf)
 if(requireNamespace("pdftools", quietly = TRUE)){ pdftools::pdf_convert(f_pdf, format = "png", dpi = 300, filenames = f_png, verbose = FALSE)
