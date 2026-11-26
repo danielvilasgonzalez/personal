@@ -31,10 +31,11 @@ REPO_DIR <- Sys.getenv("EWE_REPO", "/Users/daniel/Documents/GitHub/personal/EwE_
 R4_DIR   <- Sys.getenv("EWE_R4",   "/Users/daniel/Documents/GitHub/R4EwE")                 # R4EwE source (or install the package)
 SDM_DIR  <- Sys.getenv("EWE_SDM",  "/Users/daniel/Documents/GitHub/GFISHER/output/maps/GFISHER/5min/maxn_sdmTMB/mice")   # sdmTMB maps used by the GA
 SPATIAL_WEIGHT <- 15
-N_ENS    <- 37                                       # ensemble = best 10% of the 370 candidates
+N_ENS    <- 296                                      # ensemble = the models with NLL <= the ENS_PROP quantile of the final population (80% of 370 = 296)
 ENS_PROP <- 0.80                                     # ensemble of the predictions = models with NLL <= this quantile of the final population (296 of 370)
 tol      <- 32.2973                                  # stop tolerance, ga_stop_ga01.csv
 RUN_RESCORE <- TRUE                                  # sections 3.x re-score saved outputs; FALSE keeps only the base R sections
+PRED_ONLY <- if(exists("PRED_ONLY")) PRED_ONLY else FALSE         # TRUE: skip 3.1 to 3.4 (NLL re-scoring and spatial checks) and run only 3.5 to 3.7 (rRMSE and the ensemble cut-off; temporal predictions only)
 run_dir <- RUN; tag <- LABEL; res_dir <- file.path(RUN, "results")
 out_dir <- file.path(RUN, "plots_R", "discussion_checks"); dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
 
@@ -104,7 +105,7 @@ envp <- read.csv(file.path(run_dir, "inputs", "WFS-MICE env and red tide respons
 disp <- read.csv(file.path(run_dir, "inputs", "WFS-MICE EwE 2.13 v67020-Dispersal.csv"), check.names = FALSE)
 names(pv)[1:3] <- c("L", "base", "U")           # L.bounds, est_par_vec, U.bounds
 runs <- runs[order(runs$fitness), ]
-E    <- pop[runs$gapop_row[seq_len(N_ENS)], ]   # the ensemble: best 10% of the final population
+E    <- pop[runs$gapop_row[seq_len(N_ENS)], ]   # the ensemble: models at or below the ENS_PROP quantile of the final population
 
 # ids of the 51 calibrated values (a curve id expands to its inflection and slope)
 ids <- c()
@@ -196,6 +197,7 @@ if (RUN_RESCORE) {
     list(temporal = unname(r$LL["LL.total"]), series = setNames(det$loglik, skey(det)), maps = sp$per_species)
   }
 
+  if(!isTRUE(PRED_ONLY)) {   # 3.1 to 3.4 re-score every model with the objective (includes the spatial maps; slow)
   # ---- 3.1 re-score the ensemble members: do they miss the same series? ------------------------------
   cat("\n[3.1] Re-scoring", N_ENS, "members from output/gen30_small ...\n")
   # all 370 candidates of the final population are scored (the ensemble is the best N_ENS of them); the population files
@@ -330,41 +332,16 @@ if (RUN_RESCORE) {
   print(dm, digits = 4, row.names = FALSE)
   write.csv(mo, file.path(out_dir, "08_moran_residuals_best.csv"), row.names = FALSE)
   write.csv(dm, file.path(out_dir, "08_distribution_metrics_best.csv"), row.names = FALSE)
+  }   # end of 3.1 to 3.4 (skipped when PRED_ONLY is TRUE)
+
   # ---- 3.5 relative RMSE of the 12 stanza biomass series (gag and red grouper), baseline vs best vs members ----------
   # These series come from the stock assessments and were part of the GA objective (like all 58 fitted series);
   # the RRMSE below is a reference for them. Relative series are scaled by q = mean(pred) / mean(obs)
   # and RRMSE = rmse / mean(obs), as in the rest of the project. Writes plots_R/ts/Reference_stanza_biomass_rrmse.csv.
   th <- obs.ts$ts.head; j_all <- which(grepl("_age[1-6]_biomass$", th$Title))
   N_RR <- sum(runs$fitness <= quantile(runs$fitness, ENS_PROP))   # members of the ensemble (runs is sorted by fitness); m1 = best model
-  dirs_rr <- c(base = file.path(run_dir, "output/run_base"),
-               setNames(vapply(runs$cmd_file[seq_len(N_RR)], member_dir, character(1)), paste0("m", seq_len(N_RR))))
   obs_yrs <- as.numeric(rownames(obs.ts$ts)); styear <- min(obs_yrs)
-  norm_name <- function(x) tolower(gsub("[^a-z0-9]", "", tolower(x)))
-  rrmse_dir <- function(d){
-    regs <- r4(".detect_ecospace_regions")(d, "annual")
-    arr <- r4("fn.read_pred_ecospace_wide")(d, "Biomass", "annual", regs, styear, aggregate_by_group = FALSE)
-    ri0 <- if(0L %in% as.integer(sub("R", "", dimnames(arr)[[3]]))) which(as.integer(sub("R", "", dimnames(arr)[[3]])) == 0L) else 1L
-    common <- match(obs_yrs, as.numeric(dimnames(arr)[[1]]))
-    sapply(j_all, function(j){
-      col <- match(norm_name(group.names[th$Poolcode[j]]), norm_name(dimnames(arr)[[2]]))
-      p <- arr[, col, ri0, 1][common]; o <- obs.ts$ts[, j]; o[o <= 0] <- NA
-      ok <- !is.na(o) & !is.na(p) & p > 0; q <- 1
-      if(!isTRUE(th$Absolute[j])) q <- mean(p[ok]) / mean(o[ok])
-      sqrt(mean((o[ok] - p[ok] / q)^2)) / mean(o[ok]) })
-  }
-  RR <- sapply(dirs_rr, rrmse_dir); rownames(RR) <- th$Title[j_all]
-  mem <- RR[, -1]
-  rr_out <- data.frame(series = th$Title[j_all], rrmse_baseline = RR[, "base"], rrmse_best = RR[, "m1"], rrmse_ens_mean = rowMeans(mem),
-                       rrmse_ens_min = apply(mem, 1, min), rrmse_ens_max = apply(mem, 1, max))
-  rr_out$species <- ifelse(grepl("^GAG", rr_out$series), "Gag", "Red grouper")
-  rr_out$n_members <- N_RR
-  rr_out$stanza <- as.integer(sub(".*_age([1-6])_.*", "\\1", rr_out$series)) - 1
-  rr_out <- rr_out[order(rr_out$species, rr_out$stanza), ]; print(round(rr_out[, 2:6], 3))
-  agg <- function(k) c(baseline = mean(rr_out$rrmse_baseline[k]), best = mean(rr_out$rrmse_best[k]), ens_mean = mean(rr_out$rrmse_ens_mean[k]),
-                       ens_min = min(colMeans(mem[rr_out$series[k], , drop = FALSE])), ens_max = max(colMeans(mem[rr_out$series[k], , drop = FALSE])))
-  print(round(rbind(Gag = agg(rr_out$species == "Gag"), Red = agg(rr_out$species != "Gag"), All = agg(rep(TRUE, nrow(rr_out))),
-                    `Gag no stanza5+` = agg(rr_out$species == "Gag" & rr_out$stanza < 5)), 3))
-  write.csv(rr_out, file.path(run_dir, "plots_R", "ts", "Reference_stanza_biomass_rrmse.csv"), row.names = FALSE)
+  # the predictions of all models are read once in 3.6 below, and this section is computed from them
 
   # ---- 3.6 relative RMSE of EVERY fitted series (survey indices by region, biomass, catch, F), baseline vs best vs ensemble ----
   # Same prediction extraction and q rescaling as fn.ecospace_objfxn (types 0/1 biomass summed over the stock's pool codes and
@@ -402,12 +379,32 @@ if (RUN_RESCORE) {
   }
   dirs_all <- c(base = file.path(run_dir, "output/run_base"),
                 setNames(vapply(runs$cmd_file, member_dir, character(1)), paste0("m", seq_len(nrow(runs)))))   # every final-generation model, best first
-  PA <- lapply(dirs_all, function(d) tryCatch(pred_all_dir(d), error = function(e) matrix(NA_real_, length(obs_yrs), length(fit_rows))))
+  cache_pa <- file.path(out_dir, "06_pred_all_cache.rds")   # predictions of every model are cached: delete the file to read the output folders again
+  if(file.exists(cache_pa) && identical(names(PA <- readRDS(cache_pa)), names(dirs_all))) message("predictions read from ", cache_pa) else {
+    one_dir <- function(d) tryCatch(pred_all_dir(d), error = function(e) matrix(NA_real_, length(obs_yrs), length(fit_rows)))
+    nc <- if(.Platform$OS.type == "windows") 1L else max(1L, parallel::detectCores() - 1L)
+    PA <- if(nc > 1L) parallel::mclapply(dirs_all, one_dir, mc.cores = nc) else lapply(dirs_all, one_dir)
+    saveRDS(PA, cache_pa) }
   OBS <- obs.ts$ts[, fit_rows, drop = FALSE]; OBS[OBS <= 0] <- NA
   rr_mat <- function(Ps) sapply(seq_along(fit_rows), function(k){ o <- OBS[, k]; p <- Ps[, k]; ok <- !is.na(o) & !is.na(p)
                                  if(!any(ok)) NA_real_ else sqrt(mean((o[ok] - p[ok])^2)) / mean(o[ok]) })
   RA <- sapply(PA, rr_mat); rownames(RA) <- th$Title[fit_rows]
   memA <- RA[, 2:(N_RR + 1), drop = FALSE]   # the ENS_PROP ensemble (members are sorted by NLL, m1 = best)
+
+  # ---- 3.5 (computed from the predictions above) relative RMSE of the 12 stanza biomass series ----
+  RR <- RA[th$Title[j_all], , drop = FALSE]
+  mem <- RR[, 2:(N_RR + 1), drop = FALSE]
+  rr_out <- data.frame(series = th$Title[j_all], rrmse_baseline = RR[, "base"], rrmse_best = RR[, "m1"], rrmse_ens_mean = rowMeans(mem),
+                       rrmse_ens_min = apply(mem, 1, min), rrmse_ens_max = apply(mem, 1, max))
+  rr_out$species <- ifelse(grepl("^GAG", rr_out$series), "Gag", "Red grouper")
+  rr_out$n_members <- N_RR
+  rr_out$stanza <- as.integer(sub(".*_age([1-6])_.*", "\\1", rr_out$series)) - 1
+  rr_out <- rr_out[order(rr_out$species, rr_out$stanza), ]; print(round(rr_out[, 2:6], 3))
+  agg <- function(k) c(baseline = mean(rr_out$rrmse_baseline[k]), best = mean(rr_out$rrmse_best[k]), ens_mean = mean(rr_out$rrmse_ens_mean[k]),
+                       ens_min = min(colMeans(mem[rr_out$series[k], , drop = FALSE])), ens_max = max(colMeans(mem[rr_out$series[k], , drop = FALSE])))
+  print(round(rbind(Gag = agg(rr_out$species == "Gag"), Red = agg(rr_out$species != "Gag"), All = agg(rep(TRUE, nrow(rr_out))),
+                    `Gag no stanza5+` = agg(rr_out$species == "Gag" & rr_out$stanza < 5)), 3))
+  write.csv(rr_out, file.path(run_dir, "plots_R", "ts", "Reference_stanza_biomass_rrmse.csv"), row.names = FALSE)
   fa <- data.frame(series = th$Title[fit_rows], type = th$Type.name[fit_rows], region = th$Region[fit_rows], weight = th$Weight[fit_rows],
                    rrmse_baseline = RA[, "base"], rrmse_best = RA[, "m1"], rrmse_ens_mean = rowMeans(memA, na.rm = TRUE),
                    rrmse_ens_min = apply(memA, 1, min, na.rm = TRUE), rrmse_ens_max = apply(memA, 1, max, na.rm = TRUE), n_members = N_RR)

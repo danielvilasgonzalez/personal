@@ -23,7 +23,7 @@ library(ggplot2); library(patchwork); library(ranger)
 STRIPS <- if(exists("STRIPS")) STRIPS else FALSE   # TRUE: add the share-of-remaining-NLL strips above each panel (old layout)
 RUN <- if(exists("RUN")) RUN else Sys.getenv("EWE_RUN", "/Users/daniel/Work/ST_calibration/phase6_ga01")   # uses RUN from the main script when sourced
 EXCLUDE_STANZA_BIOMASS <- FALSE   # FALSE: all 58 fitted series (the objective the GA minimised); TRUE: leave out the 12 stanza biomass series (46 series)
-N_ENS <- 37                                    # ensemble = best 10% of the final population
+N_ENS <- 296                                   # ensemble = models with NLL <= the 80th percentile of the final population (296 of 370)
 NREP  <- 15                                    # repeated random forests for the uncertainty of the shares
 pr  <- file.path(RUN, "plots_R"); dir.create(file.path(pr, "ts"), showWarnings = FALSE, recursive = TRUE)
 tag <- ""   # same file names whichever set of series is used

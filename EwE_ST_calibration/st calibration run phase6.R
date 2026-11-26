@@ -383,4 +383,13 @@ if(all(file.exists(fig_needs))){
 ## ---- 7b. FOUR-PANEL FIGURE: convergence (A, B) + contribution of data and parameter types (C, D) ----
 if(exists("contrib_panels")) local(source(file.path(REPO_DIR, "fig convergence and contribution phase6.R"), local = TRUE))
 
+## ---- 8. rRMSE against the data used for fitting (58 series), choice of the ensemble cut-off, NLL composition table ----
+# Needs sections 3.5 to 3.7 (and 1 / 3.1) of "st results phase6.R" to have been run: they write the csv files read here.
+for(job in list(list(script = "fig rrmse fitted series phase6.R",         need = "Fitted_series_rrmse.csv"),
+                list(script = "fig rrmse reference phase6.R",             need = "Reference_stanza_biomass_rrmse.csv"),
+                list(script = "fig ensemble cutoff assessment phase6.R",  need = "Ensemble_cutoff_assessment.csv"))){
+  if(file.exists(file.path(PLOTS, "ts", job$need))) local(source(file.path(REPO_DIR, job$script), local = TRUE)) else message("Skipping ", job$script, ": run 'st results phase6.R' first (", job$need, " missing).")
+}
+if(file.exists(file.path(PLOTS, "nll_temporal_by_series.csv"))) local(source(file.path(REPO_DIR, "table nll composition phase6.R"), local = TRUE))
+
 message("Done. Figures are in ", PLOTS)
