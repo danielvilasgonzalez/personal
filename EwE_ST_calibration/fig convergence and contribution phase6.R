@@ -5,17 +5,23 @@ stopifnot(exists("p_panel1"), exists("p_panel2"), exists("contrib_panels"), exis
 
 SQUARE <- FALSE  # TRUE: all four panels square (aspect ratio 1); FALSE: panels fill the grid
 ar  <- if(SQUARE) theme(aspect.ratio = 1) else theme(aspect.ratio = NULL)
-BORD <- "black"; BW <- 0.6   # same colour and stroke for every panel contour, tick and colour-bar frame
+BORD <- "grey20"; BW <- 0.55   # same colour and stroke for every panel contour, tick and colour-bar frame
 same <- theme(panel.border = element_rect(colour = BORD, fill = NA, linewidth = BW),
               axis.ticks = element_line(colour = BORD, linewidth = BW * 0.6),
               axis.title.y = element_text(margin = margin(r = 6)), axis.title.y.right = element_text(margin = margin(l = 6)),
               axis.title.x = element_text(margin = margin(t = 6)))
 tag_th <- theme(plot.tag = element_text(face = "bold", size = 23), plot.tag.position = c(0.01, 0.99))
 mg  <- theme(plot.margin = margin(14, 5.5, 5.5, 8))
-conv1 <- p_panel1 + ar + mg + coord_cartesian(clip = "off")   # clip off: the frame is not half-hidden by the panel
-conv2 <- p_panel2 + ar + mg + coord_cartesian(clip = "off")
-pC <- contrib_panels$A + ar + theme(axis.text.x = element_text(size = 8.5), strip.text = element_text(size = 8.5))
-pD <- contrib_panels$B + ar
+# one text size for every component: tick labels, axis titles, legend text and in-plot labels
+TXT <- 10.8; TTL <- 12; BASE_TXT <- 8.5
+fix_vec <- function(p){ el <- p$theme$axis.text.y; if(!is.null(el) && length(el$size) > 1) el$size <- ifelse(el$size > 8, TXT, BASE_TXT) else if(!is.null(el)) el$size <- TXT; p + theme(axis.text.y = el) }
+set_text <- function(p, pt){ for(i in seq_along(p$layers)) if(inherits(p$layers[[i]]$geom, "GeomText")) p$layers[[i]]$aes_params$size <- pt / ggplot2::.pt; p }
+txt_th <- theme(axis.text = element_text(size = TXT), axis.text.x = element_text(size = TXT), axis.text.y.right = element_text(size = TXT, colour = "black"),
+                axis.title = element_text(size = TTL), legend.text = element_text(size = TXT))
+conv1 <- fix_vec(p_panel1) + ar + mg + coord_cartesian(clip = "off")   # clip off: the frame is not half-hidden by the panel
+conv2 <- fix_vec(p_panel2) + ar + mg + coord_cartesian(clip = "off")
+pC <- set_text(contrib_panels$A, TXT) + ar
+pD <- set_text(contrib_panels$B, TXT) + ar
 
 BAR_GAP <- 0.03; BAR_W <- 0.06   # bar position and width, as fractions of the width of panel D
 if(is.finite(contrib_panels$lo)){   # vertical NLL colour bar of C and D, on the right of the C/D row
@@ -43,8 +49,8 @@ if(is.finite(contrib_panels$lo)){   # vertical NLL colour bar of C and D, on the
     annotate("rect", xmin = x0, xmax = x1, ymin = yr[1], ymax = yr[2], fill = NA, colour = BORD, linewidth = BW) +
     annotate("segment", x = x1, xend = x1 + 0.012 * xs, y = ybrk, yend = ybrk, colour = BORD, linewidth = BW * 0.6) +
     annotate("text", x = x1 + 0.02 * xs, y = ybrk, label = format(round(brk), big.mark = ",", trim = TRUE, scientific = FALSE),
-             hjust = 0, size = 9.6 / .pt, colour = "black") +
-    annotate("text", x = x1 + 0.27 * xs, y = mean(yr), label = "NLL", angle = 90, vjust = 0.5, fontface = "bold", size = 12 / .pt) +
+             hjust = 0, size = TXT / .pt, colour = "black") +
+    annotate("text", x = x1 + 0.27 * xs, y = mean(yr), label = "NLL", angle = 90, vjust = 0.5, fontface = "bold", size = TTL / .pt) +
     theme(plot.margin = margin(14, 78, 5.5, 8))
   # give the panels of the same column the same space on the left and on the right of the panel, so A-C and B-D have identical width and position
   ext <- function(p){ g <- ggplotGrob(p); k <- which(g$layout$name == "panel")[1]
@@ -55,9 +61,9 @@ if(is.finite(contrib_panels$lo)){   # vertical NLL colour bar of C and D, on the
   eA <- ext(conv1); eB <- ext(conv2); eC <- ext(pC); eD <- ext(pD)
   tL <- pmax(eA, eC); tR <- pmax(eB, eD)
   conv1 <- padto(conv1, eA, tL); pC <- padto(pC, eC, tL); conv2 <- padto(conv2, eB, tR); pD <- padto(pD, eD, tR)
-  fig4 <- (conv1 + conv2) / (pC + pD) + plot_annotation(tag_levels = list(c("A", "B", "C", "D"))) & tag_th & same
+  fig4 <- (conv1 + conv2) / (pC + pD) + plot_annotation(tag_levels = list(c("A", "B", "C", "D"))) & tag_th & same & txt_th
 } else {
-  fig4 <- (conv1 + conv2) / (pC + pD) + plot_annotation(tag_levels = list(c("A", "B", "C", "D"))) & tag_th & same
+  fig4 <- (conv1 + conv2) / (pC + pD) + plot_annotation(tag_levels = list(c("A", "B", "C", "D"))) & tag_th & same & txt_th
 }
 f4 <- file.path(PLOTS, "ts", "Fig_NLL_convergence_and_contribution")
 ggsave(paste0(f4, ".pdf"), fig4, width = 11.6, height = 7.6, device = cairo_pdf)

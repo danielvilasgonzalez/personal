@@ -3825,6 +3825,21 @@ plot_region_map <- function(region_mask, region_attributes = NULL, title = "",
     p <- p + ggplot2::scale_fill_manual(values = region_colors, name = "Region", na.value = "white")
   }
   
+  if(show_land && outline_domain){   # extend the land over the margin north and east of the grid (no white frame between the land and the panel border)
+    p <- p + ggplot2::annotate("rect", xmin = -Inf, xmax = Inf, ymin = max(region_mask$lat) + 0.0417, ymax = Inf, fill = unname(manual_extra["Land"]), colour = NA) +
+      ggplot2::annotate("rect", xmin = max(region_mask$lon) + 0.0417, xmax = Inf, ymin = -Inf, ymax = Inf, fill = unname(manual_extra["Land"]), colour = NA)
+  }
+  if(length(region_levels) > 0){   # contour around each region, a bit darker than its fill colour
+    dark <- function(col, f = 0.7) grDevices::rgb(t(grDevices::col2rgb(col) * f), maxColorValue = 255)
+    for(lv in region_levels){
+      m <- df[!is.na(df$region_label) & df$region_label == lv, , drop = FALSE]
+      if(nrow(m) == 0) next
+      m$value <- 1
+      sg <- .domain_outline_segments(m)
+      p <- p + ggplot2::geom_segment(data = sg, ggplot2::aes(x = x, xend = xend, y = y, yend = yend), inherit.aes = FALSE,
+                                     colour = dark(unname(region_colors[lv])), linewidth = 0.5, lineend = "round")
+    }
+  }
   if(outline_domain){   # contour of the modelled area (water cells of the mask), so the extent of the model is visible
     seg <- .domain_outline_segments(region_mask)
     p <- p + ggplot2::geom_segment(data = seg, ggplot2::aes(x = x, xend = xend, y = y, yend = yend), inherit.aes = FALSE,
@@ -3834,7 +3849,8 @@ plot_region_map <- function(region_mask, region_attributes = NULL, title = "",
     seg2 <- .domain_outline_segments(extent_mask)
     p <- p + ggplot2::geom_segment(data = seg2, ggplot2::aes(x = x, xend = xend, y = y, yend = yend), inherit.aes = FALSE, colour = "black", linewidth = 0.9, lineend = "round")
   }
-  p <- p + if(fixed_aspect) ggplot2::coord_quickmap() else ggplot2::coord_cartesian(expand = FALSE)
+  # clip = "off" and the scale expansion kept (expand = outline_domain): outline lines that touch the edge of the map are drawn in full
+  p <- p + if(fixed_aspect) ggplot2::coord_quickmap(expand = outline_domain, clip = "off") else ggplot2::coord_cartesian(expand = outline_domain, clip = "off")
   p
 }
 
@@ -4244,12 +4260,18 @@ plot_region_timeseries_grid <- function(run_dir = NULL, init_run_dir = NULL, gro
     if(nlevels(sub_obs$series) > 0)
       pp <- pp + ggplot2::scale_shape_manual(values = rep(0:25, length.out = nlevels(sub_obs$series)))
     pp <- pp + ggplot2::labs(title = lbl, x = "Year", y = "Biomass (t)", shape = "Observed")
+    pp <- pp + ggplot2::scale_y_continuous(limits = c(0, NA), expand = ggplot2::expansion(mult = c(0, 0.05)))   # every region panel starts at 0 at the bottom of the frame
+    pp <- pp + ggplot2::scale_x_continuous(expand = ggplot2::expansion(mult = 0.05))   # same x expansion in every region panel
     pp <- pp + .theme_bw(base_size = base_size)
     pp <- pp + ggplot2::theme(plot.title = ggplot2::element_text(size = base_size * 1.05, face = "bold",
                                                                  color = if(use_lines) this_color else "black", margin = ggplot2::margin(b = 0),
                                                                  vjust = 0.2),
                               plot.margin = ggplot2::margin(2, 2, 2, 2),
-                              aspect.ratio = 1)
+                              aspect.ratio = 1,
+                              # same look as the NLL / contribution figures: bold axis titles, black tick text, major grid only
+                              axis.title = ggplot2::element_text(face = "bold"),
+                              axis.text = ggplot2::element_text(colour = "black"),
+                              panel.grid.minor = ggplot2::element_blank())
     # observed-series shape legend placed INSIDE the panel, top-left -- matches the WFS
     # (domain-wide) panel's own legend style exactly, rather than the wider "top" row
     # design from an earlier version, which also had the side effect of pushing the
@@ -4286,7 +4308,7 @@ plot_region_timeseries_grid <- function(run_dir = NULL, init_run_dir = NULL, gro
   map_panel <- map_panel + ggplot2::theme(
     legend.position.inside = c(0.02, 0.02),
     legend.justification.inside = c(0, 0),
-    legend.background = ggplot2::element_rect(fill = scales::alpha("white", 0.75), colour = NA),
+    legend.background = ggplot2::element_rect(fill = NA, colour = NA), legend.key = ggplot2::element_rect(fill = NA, colour = NA),
     # reduced from the previous 2.0cm/base_size*2/base_size*2.1 (too large) -- still
     # clearly the most prominent legend in the figure, just not overwhelming
     legend.key.size = grid::unit(1.0, "cm"),
@@ -4295,7 +4317,9 @@ plot_region_timeseries_grid <- function(run_dir = NULL, init_run_dir = NULL, gro
     # explicit larger axis text -- was relying on theme_bw()'s default (base_size*0.8),
     # which read too small for the map's lon/lat tick labels
     axis.text = ggplot2::element_text(size = base_size * 0.9, color = "black"),
-    axis.title = ggplot2::element_text(size = base_size),
+    axis.title = ggplot2::element_text(size = base_size, face = "bold"),
+    plot.title = ggplot2::element_text(face = "bold", margin = ggplot2::margin(b = 4)),
+    panel.grid.minor = ggplot2::element_blank(),
     aspect.ratio = 1,
     plot.margin = ggplot2::margin(2, 2, 2, 2)
   )
@@ -4324,6 +4348,8 @@ plot_region_timeseries_grid <- function(run_dir = NULL, init_run_dir = NULL, gro
       pp_domain <- .build_domain_wide_panel(domain_data, init_run_dir, base_size,
                                             show_ensemble = show_ensemble)
       pp_domain <- pp_domain + ggplot2::theme(plot.margin = ggplot2::margin(2, 2, 2, 2), aspect.ratio = 1)
+      pp_domain <- pp_domain + ggplot2::scale_y_continuous(limits = c(0, NA), expand = ggplot2::expansion(mult = c(0, 0.05)))   # same 0 baseline as the region panels
+      pp_domain <- pp_domain + ggplot2::scale_x_continuous(expand = ggplot2::expansion(mult = 0.05))
       ordered_panels <- c(ordered_panels, list("WFS" = pp_domain))
     }
   }

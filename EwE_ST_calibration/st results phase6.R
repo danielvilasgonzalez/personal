@@ -32,6 +32,7 @@ R4_DIR   <- Sys.getenv("EWE_R4",   "/Users/daniel/Documents/GitHub/R4EwE")      
 SDM_DIR  <- Sys.getenv("EWE_SDM",  "/Users/daniel/Documents/GitHub/GFISHER/output/maps/GFISHER/5min/maxn_sdmTMB/mice")   # sdmTMB maps used by the GA
 SPATIAL_WEIGHT <- 15
 N_ENS    <- 37                                       # ensemble = best 10% of the 370 candidates
+ENS_PROP <- 0.80                                     # ensemble of the predictions = models with NLL <= this quantile of the final population (296 of 370)
 tol      <- 32.2973                                  # stop tolerance, ga_stop_ga01.csv
 RUN_RESCORE <- TRUE                                  # sections 3.x re-score saved outputs; FALSE keeps only the base R sections
 run_dir <- RUN; tag <- LABEL; res_dir <- file.path(RUN, "results")
@@ -334,8 +335,9 @@ if (RUN_RESCORE) {
   # the contribution figure; the RRMSE is only a reference. Relative series are scaled by q = mean(pred) / mean(obs)
   # and RRMSE = rmse / mean(obs), as in the rest of the project. Writes plots_R/ts/Reference_stanza_biomass_rrmse.csv.
   th <- obs.ts$ts.head; j_all <- which(grepl("_age[1-6]_biomass$", th$Title))
+  N_RR <- sum(runs$fitness <= quantile(runs$fitness, ENS_PROP))   # members of the ensemble (runs is sorted by fitness); m1 = best model
   dirs_rr <- c(base = file.path(run_dir, "output/run_base"),
-               setNames(vapply(runs$cmd_file[seq_len(N_ENS)], member_dir, character(1)), paste0("m", seq_len(N_ENS))))
+               setNames(vapply(runs$cmd_file[seq_len(N_RR)], member_dir, character(1)), paste0("m", seq_len(N_RR))))
   obs_yrs <- as.numeric(rownames(obs.ts$ts)); styear <- min(obs_yrs)
   norm_name <- function(x) tolower(gsub("[^a-z0-9]", "", tolower(x)))
   rrmse_dir <- function(d){
@@ -355,6 +357,7 @@ if (RUN_RESCORE) {
   rr_out <- data.frame(series = th$Title[j_all], rrmse_baseline = RR[, "base"], rrmse_best = RR[, "m1"], rrmse_ens_mean = rowMeans(mem),
                        rrmse_ens_min = apply(mem, 1, min), rrmse_ens_max = apply(mem, 1, max))
   rr_out$species <- ifelse(grepl("^GAG", rr_out$series), "Gag", "Red grouper")
+  rr_out$n_members <- N_RR
   rr_out$stanza <- as.integer(sub(".*_age([1-6])_.*", "\\1", rr_out$series)) - 1
   rr_out <- rr_out[order(rr_out$species, rr_out$stanza), ]; print(round(rr_out[, 2:6], 3))
   agg <- function(k) c(baseline = mean(rr_out$rrmse_baseline[k]), best = mean(rr_out$rrmse_best[k]), ens_mean = mean(rr_out$rrmse_ens_mean[k]),
