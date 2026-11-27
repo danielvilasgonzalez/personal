@@ -66,6 +66,6 @@ if(is.finite(contrib_panels$lo)){   # vertical NLL colour bar of C and D, on the
   fig4 <- (conv1 + conv2) / (pC + pD) + plot_annotation(tag_levels = list(c("A", "B", "C", "D"))) & tag_th & same & txt_th
 }
 f4 <- file.path(PLOTS, "ts", "Fig_NLL_convergence_and_contribution")
-ggsave(paste0(f4, ".pdf"), fig4, width = 11.6, height = 7.6, device = cairo_pdf)
+ggsave(paste0(f4, ".pdf"), fig4, width = 11.6, height = 7.6, device = pdf_device())
 ggsave(paste0(f4, ".png"), fig4, width = 11.6, height = 7.6, dpi = 300, bg = "white")
 message("saved ", basename(f4), ".png / .pdf")

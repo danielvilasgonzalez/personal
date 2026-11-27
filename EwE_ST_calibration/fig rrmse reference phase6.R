@@ -35,6 +35,6 @@ p <- ggplot(long, aes(stanza_lab, y, colour = model, fill = model, shape = model
         strip.text = element_text(size = TTL, face = "bold"), strip.background = element_rect(fill = "grey92", colour = "grey20", linewidth = 0.55),
         legend.position = "bottom", legend.text = element_text(size = TXT), aspect.ratio = 1)
 ggsave(file.path(OUT, "Fig_S_rrmse_reference_stanza.png"), p, width = 9, height = 5, dpi = 300, bg = "white")
-ggsave(file.path(OUT, "Fig_S_rrmse_reference_stanza.pdf"), p, width = 9, height = 5, device = cairo_pdf)
+ggsave(file.path(OUT, "Fig_S_rrmse_reference_stanza.pdf"), p, width = 9, height = 5, device = pdf_device())
 message("saved Fig_S_rrmse_reference_stanza and Table_S_rrmse_reference_stanza", if(is.na(n_ens)) "" else paste0(" (ensemble of ", n_ens, " models)"))
 print(tab)

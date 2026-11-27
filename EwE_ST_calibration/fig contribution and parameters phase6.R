@@ -321,7 +321,7 @@ if(STRIPS){   # two rows per side: share of the remaining NLL (strip) above the 
 }
 if(exists("pA1") && exists("pB1")) assign("contrib_panels", list(A = pA1, B = pB1, bar = if(exists("pBar")) pBar else NULL, lo = if(exists("lo_f")) lo_f else NA, hi = if(exists("hi_f")) hi_f else NA, brk = if(exists("fit_brk")) fit_brk else NULL), envir = globalenv())   # panels reused by the combined convergence + contribution figure
 f_pdf <- file.path(pr, "ts", paste0("Fig_contribution_of_components", tag, ".pdf")); f_png <- sub("\\.pdf$", ".png", f_pdf)
-ggsave(f_pdf, fig, width = 9.5, height = fig_h, device = cairo_pdf)
+ggsave(f_pdf, fig, width = 9.5, height = fig_h, device = pdf_device())
 if(requireNamespace("pdftools", quietly = TRUE)){ pdftools::pdf_convert(f_pdf, format = "png", dpi = 300, filenames = f_png, verbose = FALSE)
 } else ggsave(f_png, fig, width = 9.5, height = fig_h, dpi = 300, bg = "white")
 

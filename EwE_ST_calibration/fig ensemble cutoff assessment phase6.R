@@ -26,6 +26,6 @@ p <- (mk("coverage", "Observations inside the band", c(0, 1)) + mk("rel_width", 
       mk("w_rrmse_mean", "RRMSE of the ensemble mean x weight", c(0, NA))) +
   plot_layout(guides = "collect", nrow = 1) & theme(legend.position = "bottom")
 ggsave(file.path(OUT, "Fig_S_ensemble_cutoff_assessment.png"), p, width = 15, height = 5.6, dpi = 300, bg = "white")
-ggsave(file.path(OUT, "Fig_S_ensemble_cutoff_assessment.pdf"), p, width = 15, height = 5.6, device = cairo_pdf)
+ggsave(file.path(OUT, "Fig_S_ensemble_cutoff_assessment.pdf"), p, width = 15, height = 5.6, device = pdf_device())
 write.csv(cbind(all[, c("cutoff", "n_members", "coverage", "rel_width", "rrmse_mean", "w_rrmse_mean")]), file.path(OUT, "Table_S_ensemble_cutoff_assessment.csv"), row.names = FALSE)
 message("saved Fig_S_ensemble_cutoff_assessment (dashed line = ", 100 * ENS_PROP, "% cut-off)")

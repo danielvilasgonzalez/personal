@@ -47,5 +47,5 @@ p <- (mkp("rrmse_", "Relative RMSE against the fitted data", FALSE) + mkp("w_rrm
   patchwork::plot_layout(guides = "collect", widths = c(1.15, 1)) & theme(legend.position = "bottom")
 h <- max(5, 1.6 + 0.2 * nrow(d))
 ggsave(file.path(OUT, "Fig_S_rrmse_fitted_series.png"), p, width = 14, height = h, dpi = 300, bg = "white")
-ggsave(file.path(OUT, "Fig_S_rrmse_fitted_series.pdf"), p, width = 14, height = h, device = cairo_pdf)
+ggsave(file.path(OUT, "Fig_S_rrmse_fitted_series.pdf"), p, width = 14, height = h, device = pdf_device())
 message("saved Fig_S_rrmse_fitted_series and Table_S_rrmse_fitted_series (ensemble of ", n_ens, " models)")

@@ -235,7 +235,7 @@ if(EXTRA_PLOTS){
 }
 
 # Supplementary time series of the final population, drawn twice: ALL 370 last-generation models ("_all") and the best 80% ("_best80";
-# the worst 20% are outliers), coloured by NLL, + baseline + best (no ensemble mean). Per species (Biomass, Catch, F) and, for Biomass,
+# the worst 20% are outliers), coloured by NLL, + baseline + best (+ ensemble mean in the best-80% version). Per species (Biomass, Catch, F) and, for Biomass,
 # gag + red grouper together in one figure (3 columns x 4 rows, gag on top). The y-axis follows the observations (ylim_from_obs = TRUE)
 # because the worst candidates are far off scale; the colour scale is capped at the 95th percentile of the NLL.
 # Files: <Var>_ensemble_facet_<species>_quantile_<all|best80>.png and Biomass_ensemble_facet_gag_and_red_grouper_quantile_<all|best80>_both.png
@@ -244,14 +244,14 @@ for(sel in list(list(q = 1, tag = "_all"), list(q = ENS_PROP, tag = "_best80")))
     obs, ga_runs, init_run_dir = BASE_RUN, vars = c("Biomass", "Catch", "F"),
     species_patterns = c("gag", "red grouper"),
     ens_mode = "quantile", keep_fitness_quantile = sel$q, max_candidates = 1000,
-    palette = "plasma", alpha = 0.55, line_width = 0.3, show_mean = FALSE, ylim_from_obs = TRUE, ylim_pad = 0.3,
-    text_scale = 1.4,   # larger text; no ensemble mean when all models are drawn
+    palette = "plasma", alpha = 0.55, line_width = 0.3, show_mean = sel$q < 1, ylim_from_obs = TRUE, ylim_pad = 0.3,
+    text_scale = 1.4,   # larger text; ensemble mean (equal weights) only in the best-80% version, not when all 370 models are drawn
     file_suffix = sel$tag, plots_dir = file.path(PLOTS, "ts"))
   facet_both <- plot_ga_ensemble_faceted(
     obs, ga_runs, init_run_dir = BASE_RUN, vars = "Biomass",
     species_patterns = c("gag", "red grouper"), combine_species = TRUE,
     ens_mode = "quantile", keep_fitness_quantile = sel$q, max_candidates = 1000,
-    palette = "plasma", alpha = 0.55, line_width = 0.3, show_mean = FALSE, ylim_from_obs = TRUE, ylim_pad = 0.3,
+    palette = "plasma", alpha = 0.55, line_width = 0.3, show_mean = sel$q < 1, ylim_from_obs = TRUE, ylim_pad = 0.3,
     text_scale = 1.4, width = 10, height = 13.5,
     file_suffix = paste0(sel$tag, "_both"), plots_dir = file.path(PLOTS, "ts"))
 }
@@ -363,6 +363,11 @@ resid_faceted_older_aic <- plot_spatial_residuals_older_stanzas(
   lon_breaks = lon_breaks, lat_breaks = lat_breaks, barheight = 2.8, barwidth = 0.45,
   facet_ncol = 3, plots_dir = file.path(PLOTS, "residuals"))
 print(resid_faceted_older_aic)
+
+# the four maps the GA fitted (gag 2-4, gag 5+, red grouper 3-4, red grouper 5+): one 2 x 2 figure with large text, ensemble mean predictions
+resid_fitted_maps <- plot_spatial_residuals_fitted_maps(
+  raster_dir = MAXN_DIR, ga_runs = ga_runs, keep_fitness_quantile = ENS_PROP, land_mask = land_mask,
+  lon_breaks = lon_breaks, lat_breaks = lat_breaks, max_folders = N_CAND, plots_dir = file.path(PLOTS, "residuals"))
 
 ## ---- 6. RESPONSE FUNCTIONS ---------------------------------------------------------------------
 if(EXTRA_PLOTS){

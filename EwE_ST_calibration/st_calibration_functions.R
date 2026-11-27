@@ -3927,7 +3927,7 @@ plot_region_timeseries_grid <- function(run_dir = NULL, init_run_dir = NULL, gro
                                         map_palette = "custom", map_show_land = TRUE,
                                         map_fixed_aspect = FALSE,
                                         extent_csv = NULL,   # path to an EcospaceMap*.csv export: its predicted cells are outlined on the map
-                                        member_lines_grey = FALSE,   # TRUE (ensemble_style = "ribbon"): also draw every ensemble member as a thin grey line behind the band, baseline and mean
+                                        member_lines_grey = FALSE,   # TRUE (ensemble_style = "ribbon"): also draw every ensemble member as a thin line in the region colour behind the band, baseline and mean
                                         ribbon_probs = c(0.025, 0.975),   # lower / upper quantile of the ribbon (c(0.05, 0.95) = 90% interval across the selected models)
                                         plots_dir = "plots",
                                         png_file = NULL,
@@ -4244,7 +4244,7 @@ plot_region_timeseries_grid <- function(run_dir = NULL, init_run_dir = NULL, gro
         sub_g <- cand_region_df[cand_region_df$region_id == rid, , drop = FALSE]
         if(nrow(sub_g) > 0)
           pp <- pp + ggplot2::geom_line(data = sub_g, ggplot2::aes(x = year, y = biomass_sum, group = run_folder),
-                                        colour = "grey55", linewidth = 0.3, alpha = 0.5)   # every ensemble member, behind the band
+                                        colour = this_color, linewidth = 0.25, alpha = 0.15)   # every ensemble member in the region colour, kept faint so the mean stays visible
       }
       if(!is.null(sub_ribbon) && nrow(sub_ribbon) > 0)
         pp <- pp + ggplot2::geom_ribbon(data = sub_ribbon,
@@ -4252,16 +4252,18 @@ plot_region_timeseries_grid <- function(run_dir = NULL, init_run_dir = NULL, gro
                                         fill = this_color, alpha = 0.25, colour = NA)   # uncertainty of the retained models, in the region colour
       if(nrow(sub_init) > 0)
         pp <- pp + ggplot2::geom_line(data = sub_init, ggplot2::aes(x = year, y = biomass_sum),
-                                      color = "black", linewidth = 0.9, linetype = "22")
+                                      color = "black", linewidth = 1.6, linetype = "22")
+      if(nrow(sub_ens) > 0 && member_lines_grey)   # white halo under the mean so it separates from the member lines
+        pp <- pp + ggplot2::geom_line(data = sub_ens, ggplot2::aes(x = year, y = biomass_sum), color = "white", linewidth = 2.8, alpha = 0.9)
       if(nrow(sub_ens) > 0)
         pp <- pp + ggplot2::geom_line(data = sub_ens, ggplot2::aes(x = year, y = biomass_sum),
-                                      color = this_color, linewidth = 1.2)   # ensemble mean: solid, region colour
+                                      color = this_color, linewidth = 1.6)   # ensemble mean: solid, region colour
     } else {
       if(nrow(sub_init) > 0)
         pp <- pp + ggplot2::geom_line(data = sub_init, ggplot2::aes(x = year, y = biomass_sum, linetype = "init"),
                                       color = "black", linewidth = 0.9)
       pp <- pp + ggplot2::geom_line(data = sub_best, ggplot2::aes(x = year, y = biomass_sum, linetype = "best-fit"),
-                                    color = this_color, linewidth = 1.2)
+                                    color = this_color, linewidth = 1.6)
       pp <- pp + ggplot2::scale_linetype_manual(values = c("init" = "22", "best-fit" = "solid"), name = NULL)
     }
     pp <- pp + ggplot2::geom_point(data = sub_obs, ggplot2::aes(x = year, y = value, shape = series),
@@ -4562,23 +4564,25 @@ plot_region_timeseries_grid <- function(run_dir = NULL, init_run_dir = NULL, gro
     # "ensemble mode shows only the weighted mean and its uncertainty" convention.
     if(!is.null(domain_data$grey_cand_df))
       pp <- pp + ggplot2::geom_line(data = domain_data$grey_cand_df, ggplot2::aes(x = year, y = biomass_sum, group = run_folder),
-                                    colour = "grey55", linewidth = 0.3, alpha = 0.5)
+                                    colour = "black", linewidth = 0.25, alpha = 0.12)
     if(!is.null(ribbon_df) && nrow(ribbon_df) > 0)
       pp <- pp + ggplot2::geom_ribbon(data = ribbon_df,
                                       ggplot2::aes(x = year, ymin = pmax(lo, 0), ymax = hi),
                                       fill = "black", alpha = 0.20, colour = NA)
     if(nrow(sub_init) > 0)
       pp <- pp + ggplot2::geom_line(data = sub_init, ggplot2::aes(x = year, y = value),
-                                    color = "black", linewidth = 0.9, linetype = "22")
+                                    color = "black", linewidth = 1.6, linetype = "22")
+    if(nrow(ens_mean_df) > 0 && !is.null(domain_data$grey_cand_df))   # white halo under the mean when member lines are drawn
+      pp <- pp + ggplot2::geom_line(data = ens_mean_df, ggplot2::aes(x = year, y = value), color = "white", linewidth = 2.8, alpha = 0.9)
     if(nrow(ens_mean_df) > 0)   # ensemble mean solid (domain-wide panel has no region colour -> black), same convention as the region panels
       pp <- pp + ggplot2::geom_line(data = ens_mean_df, ggplot2::aes(x = year, y = value),
-                                    color = "black", linewidth = 1.2)
+                                    color = "black", linewidth = 1.6)
   } else {
     if(nrow(sub_init) > 0)
       pp <- pp + ggplot2::geom_line(data = sub_init, ggplot2::aes(x = year, y = value, linetype = "init"),
                                     color = "black", linewidth = 0.9)
     pp <- pp + ggplot2::geom_line(data = sub_best, ggplot2::aes(x = year, y = value, linetype = "best-fit"),
-                                  color = "black", linewidth = 1.2)
+                                  color = "black", linewidth = 1.6)
     pp <- pp + ggplot2::scale_linetype_manual(values = c("init" = "22", "best-fit" = "solid"), name = NULL)
   }
   if(!is.null(obs_df)){
@@ -10028,4 +10032,72 @@ add_uncalibrated_params <- function(tested_tbl, catalog, gapop_init, gapop_final
     parvec <- rbind(parvec, row)
   }
   list(gapop_init = gapop_init, gapop_final = gapop_final, parvec = parvec, uncal_ids = names(newv))
+}
+
+# PDF device for ggsave(): cairo_pdf when the cairo library loads (needs XQuartz on a Mac that does not have it), otherwise the base pdf device
+pdf_device <- function(){
+  ok <- tryCatch({ f <- tempfile(fileext = ".pdf"); suppressWarnings(grDevices::cairo_pdf(f)); grDevices::dev.off(); unlink(f); TRUE },
+                 error = function(e) FALSE, warning = function(w) FALSE)
+  if(ok) grDevices::cairo_pdf else function(file, width, height, ...) grDevices::pdf(file, width = width, height = height, useDingbats = FALSE)
+}
+
+
+# Standardized spatial residuals for the maps the GA actually fitted (gag 2-4, gag 5+, red grouper 3-4, red grouper 5+), in ONE 2 x 2 figure with large text.
+# Observed = the combined GFISHER raster of the fitted map; predicted = ensemble mean of the stanzas that make up that map, summed (sum of means = mean of sums).
+# Residual = observed (rescaled to the predicted mean) - predicted, divided by its SD: blue = predicted below observed, red = predicted above observed.
+plot_spatial_residuals_fitted_maps <- function(raster_dir, ga_runs, keep_fitness_quantile = 0.8,
+                                               land_mask = NULL, lon_breaks = NULL, lat_breaks = NULL,
+                                               maps = list(list(label = "Gag 2-4",          raster = "gag-2-4_",           stanzas = c("gag 2", "gag 3", "gag 4")),
+                                                           list(label = "Gag 5+",           raster = "gag-5-_",            stanzas = "gag 5+"),
+                                                           list(label = "Red grouper 3-4",  raster = "red-grouper-3-4_",   stanzas = c("red grouper 3", "red grouper 4")),
+                                                           list(label = "Red grouper 5+",   raster = "red-grouper-5-_",    stanzas = "red grouper 5+")),
+                                               max_folders = 400, base_size = 18, title_size = 24, barheight = 4.2, barwidth = 0.75,
+                                               plots_dir = "plots", png_file = "residuals_fitted_maps_gag_red_grouper.png",
+                                               ncol = 2, width = 11.5, height = 11.5, dpi = 300){
+  valid <- ga_runs[ga_runs$exists, , drop = FALSE]
+  sel <- select_ensemble_candidates(valid, mode = "quantile", keep_fitness_quantile = keep_fitness_quantile)
+  valid <- valid[valid$run_folder %in% sel$run_folder, , drop = FALSE]
+  dirs <- valid$run_dir[seq_len(min(nrow(valid), max_folders))]
+  message("plot_spatial_residuals_fitted_maps(): ensemble of ", length(dirs), " model(s)")
+  rfiles <- list.files(raster_dir, pattern = "\\.asc$", full.names = TRUE)
+  panels <- list(); stats_out <- list()
+  for(mp in maps){
+    rf <- rfiles[grepl(mp$raster, basename(rfiles), fixed = TRUE)]
+    if(length(rf) == 0){ message("  [skip] no observed raster matching '", mp$raster, "' in ", raster_dir); next }
+    pred <- NULL
+    for(st in mp$stanzas){
+      tok <- tryCatch(detect_map_group_tokens(dirs, "Biomass", species_patterns = st), error = function(e) NULL)
+      if(is.null(tok) || nrow(tok) == 0){ pred <- NULL; message("  [skip] ", mp$label, ": no map token for '", st, "'"); break }
+      ex <- tok[tolower(tok$display) == st, , drop = FALSE]; tk <- if(nrow(ex) == 1) ex$token[1] else tok$token[1]
+      ps <- compute_ensemble_map_stats(dirs, "Biomass", tk)
+      d <- as.data.frame(ps$agg[, list(row, col, lat, lon, value = mean_val)])
+      pred <- if(is.null(pred)) d else { m <- merge(pred, d[, c("row", "col", "value")], by = c("row", "col"), suffixes = c("", "_add")); m$value <- m$value + m$value_add; m$value_add <- NULL; m }
+    }
+    if(is.null(pred)) next
+    res <- compute_spatial_residuals(read_esri_ascii(rf[1]), pred)
+    stats_out[[mp$label]] <- data.frame(map = mp$label, n_cells = nrow(res), mean_std_resid = mean(res$residual_std, na.rm = TRUE),
+                                        share_pred_above_obs = mean(res$residual_std < 0, na.rm = TRUE),
+                                        share_abs_gt2 = mean(abs(res$residual_std) > 2, na.rm = TRUE))
+    panels[[length(panels) + 1]] <- list(label = mp$label, res = res)
+  }
+  if(length(panels) == 0) stop("plot_spatial_residuals_fitted_maps(): no map could be built.")
+  n <- length(panels); nr <- ceiling(n / ncol); ps <- vector("list", n)
+  for(i in seq_len(n)){
+    cp <- ((i - 1) %% ncol) + 1
+    pn <- plot_spatial_residuals(panels[[i]]$res, title = "", land_mask = land_mask,
+                                 show_x_axis = (i > n - ncol), show_y_axis = (cp == 1),
+                                 lon_breaks = lon_breaks, lat_breaks = lat_breaks,
+                                 barheight = barheight, barwidth = barwidth, inside_legend = TRUE,
+                                 base_size = base_size, fixed_aspect = FALSE)
+    tg <- patchwork::wrap_elements(grid::textGrob(panels[[i]]$label, x = grid::unit(0.5, "npc"), y = grid::unit(0.4, "npc"),
+                                                  gp = grid::gpar(fontsize = title_size, fontface = "bold")), clip = FALSE)
+    ps[[i]] <- (tg / pn) + patchwork::plot_layout(heights = c(0.09, 1)) & ggplot2::theme(plot.margin = ggplot2::margin(2, 4, 2, 4))
+  }
+  combined <- patchwork::wrap_plots(ps, ncol = ncol)
+  if(!dir.exists(plots_dir)) dir.create(plots_dir, recursive = TRUE, showWarnings = FALSE)
+  ggplot2::ggsave(file.path(plots_dir, png_file), combined, width = width, height = height, dpi = dpi, units = "in")
+  st_tab <- do.call(rbind, stats_out); print(st_tab, digits = 3)
+  utils::write.csv(st_tab, file.path(plots_dir, sub("\\.png$", ".csv", png_file)), row.names = FALSE)
+  message("Wrote ", file.path(plots_dir, png_file))
+  invisible(st_tab)
 }
