@@ -4252,12 +4252,12 @@ plot_region_timeseries_grid <- function(run_dir = NULL, init_run_dir = NULL, gro
                                         fill = this_color, alpha = 0.25, colour = NA)   # uncertainty of the retained models, in the region colour
       if(nrow(sub_init) > 0)
         pp <- pp + ggplot2::geom_line(data = sub_init, ggplot2::aes(x = year, y = biomass_sum),
-                                      color = "black", linewidth = 1.6, linetype = "22")
+                                      color = "black", linewidth = 2.2, linetype = "22")
       if(nrow(sub_ens) > 0 && member_lines_grey)   # white halo under the mean so it separates from the member lines
-        pp <- pp + ggplot2::geom_line(data = sub_ens, ggplot2::aes(x = year, y = biomass_sum), color = "white", linewidth = 2.8, alpha = 0.9)
+        pp <- pp + ggplot2::geom_line(data = sub_ens, ggplot2::aes(x = year, y = biomass_sum), color = "white", linewidth = 3.6, alpha = 0.9)
       if(nrow(sub_ens) > 0)
         pp <- pp + ggplot2::geom_line(data = sub_ens, ggplot2::aes(x = year, y = biomass_sum),
-                                      color = this_color, linewidth = 1.6)   # ensemble mean: solid, region colour
+                                      color = this_color, linewidth = 2.2)   # ensemble mean: solid, region colour
     } else {
       if(nrow(sub_init) > 0)
         pp <- pp + ggplot2::geom_line(data = sub_init, ggplot2::aes(x = year, y = biomass_sum, linetype = "init"),
@@ -4571,12 +4571,12 @@ plot_region_timeseries_grid <- function(run_dir = NULL, init_run_dir = NULL, gro
                                       fill = "black", alpha = 0.20, colour = NA)
     if(nrow(sub_init) > 0)
       pp <- pp + ggplot2::geom_line(data = sub_init, ggplot2::aes(x = year, y = value),
-                                    color = "black", linewidth = 1.6, linetype = "22")
+                                    color = "black", linewidth = 2.2, linetype = "22")
     if(nrow(ens_mean_df) > 0 && !is.null(domain_data$grey_cand_df))   # white halo under the mean when member lines are drawn
-      pp <- pp + ggplot2::geom_line(data = ens_mean_df, ggplot2::aes(x = year, y = value), color = "white", linewidth = 2.8, alpha = 0.9)
+      pp <- pp + ggplot2::geom_line(data = ens_mean_df, ggplot2::aes(x = year, y = value), color = "white", linewidth = 3.6, alpha = 0.9)
     if(nrow(ens_mean_df) > 0)   # ensemble mean solid (domain-wide panel has no region colour -> black), same convention as the region panels
       pp <- pp + ggplot2::geom_line(data = ens_mean_df, ggplot2::aes(x = year, y = value),
-                                    color = "black", linewidth = 1.6)
+                                    color = "black", linewidth = 2.2)
   } else {
     if(nrow(sub_init) > 0)
       pp <- pp + ggplot2::geom_line(data = sub_init, ggplot2::aes(x = year, y = value, linetype = "init"),
