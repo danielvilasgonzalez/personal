@@ -25,13 +25,13 @@
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 #USER INPUT------------------------------------------------------------------------------------
-RUN      <- Sys.getenv("EWE_RUN",  "/Users/daniel/Work/ST_calibration/phase6_ga01")
+RUN      <- Sys.getenv("EWE_RUN",  file.path(path.expand("~"), "Work/ST_calibration/phase6_ga01"))
 LABEL    <- "ga01"
-REPO_DIR <- Sys.getenv("EWE_REPO", "/Users/daniel/Documents/GitHub/personal/EwE_ST_calibration")
-R4_DIR   <- Sys.getenv("EWE_R4",   "/Users/daniel/Documents/GitHub/R4EwE")                 # R4EwE source (or install the package)
-SDM_DIR  <- Sys.getenv("EWE_SDM",  "/Users/daniel/Documents/GitHub/GFISHER/output/maps/GFISHER/5min/maxn_sdmTMB/mice")   # sdmTMB maps used by the GA
+REPO_DIR <- Sys.getenv("EWE_REPO", file.path(path.expand("~"), "Documents/GitHub/personal/EwE_ST_calibration"))
+R4_DIR   <- Sys.getenv("EWE_R4",   file.path(path.expand("~"), "Documents/GitHub/R4EwE"))                 # R4EwE source (or install the package)
+SDM_DIR  <- Sys.getenv("EWE_SDM",  file.path(path.expand("~"), "Documents/GitHub/GFISHER/output/maps/GFISHER/5min/maxn_sdmTMB/mice"))   # sdmTMB maps used by the GA
 SPATIAL_WEIGHT <- 15
-N_ENS    <- 296                                      # ensemble = the models with NLL <= the ENS_PROP quantile of the final population (80% of 370 = 296)
+N_ENS    <- NA                                       # set below from ENS_PROP once the final population is read (296 of 370 at 0.80)
 ENS_PROP <- 0.80                                     # ensemble of the predictions = models with NLL <= this quantile of the final population (296 of 370)
 tol      <- 32.2973                                  # stop tolerance, ga_stop_ga01.csv
 RUN_RESCORE <- TRUE                                  # sections 3.x re-score saved outputs; FALSE keeps only the base R sections
@@ -105,6 +105,7 @@ envp <- read.csv(file.path(run_dir, "inputs", "WFS-MICE env and red tide respons
 disp <- read.csv(file.path(run_dir, "inputs", "WFS-MICE EwE 2.13 v67020-Dispersal.csv"), check.names = FALSE)
 names(pv)[1:3] <- c("L", "base", "U")           # L.bounds, est_par_vec, U.bounds
 runs <- runs[order(runs$fitness), ]
+N_ENS <- sum(runs$fitness <= quantile(runs$fitness, ENS_PROP))   # ensemble size from the cut-off itself (296 of 370 at 0.80)
 E    <- pop[runs$gapop_row[seq_len(N_ENS)], ]   # the ensemble: models at or below the ENS_PROP quantile of the final population
 
 # ids of the 51 calibrated values (a curve id expands to its inflection and slope)
@@ -384,6 +385,9 @@ if (RUN_RESCORE) {
     one_dir <- function(d) tryCatch(pred_all_dir(d), error = function(e) matrix(NA_real_, length(obs_yrs), length(fit_rows)))
     nc <- if(.Platform$OS.type == "windows") 1L else (if(exists("N_CORES")) as.integer(N_CORES) else as.integer(Sys.getenv("EWE_CORES", "3")))   # cores: set N_CORES or EWE_CORES
     PA <- if(nc > 1L) parallel::mclapply(dirs_all, one_dir, mc.cores = nc) else lapply(dirs_all, one_dir)
+    bad <- vapply(PA, function(x) !is.matrix(x) || nrow(x) != length(obs_yrs) || ncol(x) != length(fit_rows), logical(1))   # a killed worker returns NULL / try-error
+    if(any(bad)){ message(sum(bad), " folder(s) failed in the parallel read, re-reading them one by one: ", paste(head(names(PA)[bad], 5), collapse = ", ")); PA[bad] <- lapply(dirs_all[bad], one_dir) }
+    stopifnot(all(vapply(PA, is.matrix, logical(1))))
     saveRDS(PA, cache_pa) }
   OBS <- obs.ts$ts[, fit_rows, drop = FALSE]; OBS[OBS <= 0] <- NA
   rr_mat <- function(Ps) sapply(seq_along(fit_rows), function(k){ o <- OBS[, k]; p <- Ps[, k]; ok <- !is.na(o) & !is.na(p)
@@ -431,7 +435,7 @@ if (RUN_RESCORE) {
   cut_df <- do.call(rbind, lapply(cut_p, function(p){ k <- if(p == 0) 1 else sum(fit_all <= quantile(fit_all, p)); r <- one(k); r$cutoff <- p; r }))
   cut_df <- cut_df[!is.na(cut_df$rrmse_mean), ]; cut_df$w_rrmse_mean <- cut_df$rrmse_mean * cut_df$weight
   summ <- function(d) data.frame(n_members = d$n_members[1], n_series = nrow(d), coverage = mean(d$coverage, na.rm = TRUE), rel_width = mean(d$rel_width, na.rm = TRUE),
-                                 rrmse_mean = mean(d$rrmse_mean), w_rrmse_mean = mean(d$w_rrmse_mean), w_rrmse_mean_weighted = weighted.mean(d$rrmse_mean * d$weight, d$weight))
+                                 rrmse_mean = mean(d$rrmse_mean), w_rrmse_mean = mean(d$w_rrmse_mean))
   cut_out <- do.call(rbind, lapply(split(cut_df, cut_df$cutoff), function(d) rbind(cbind(cutoff = d$cutoff[1], group = "All series", summ(d)),
                                    do.call(rbind, lapply(split(d, d$type), function(e) cbind(cutoff = e$cutoff[1], group = e$type[1], summ(e)))))))
   print(round(cut_out[cut_out$group == "All series", c("cutoff", "n_members", "coverage", "rel_width", "rrmse_mean", "w_rrmse_mean")], 3), row.names = FALSE)

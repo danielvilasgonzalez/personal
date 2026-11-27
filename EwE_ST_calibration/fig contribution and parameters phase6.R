@@ -21,9 +21,9 @@
 library(ggplot2); library(patchwork); library(ranger)
 
 STRIPS <- if(exists("STRIPS")) STRIPS else FALSE   # TRUE: add the share-of-remaining-NLL strips above each panel (old layout)
-RUN <- if(exists("RUN")) RUN else Sys.getenv("EWE_RUN", "/Users/daniel/Work/ST_calibration/phase6_ga01")   # uses RUN from the main script when sourced
+RUN <- if(exists("RUN")) RUN else Sys.getenv("EWE_RUN", file.path(path.expand("~"), "Work/ST_calibration/phase6_ga01"))   # uses RUN from the main script when sourced
 EXCLUDE_STANZA_BIOMASS <- FALSE   # FALSE: all 58 fitted series (the objective the GA minimised); TRUE: leave out the 12 stanza biomass series (46 series)
-N_ENS <- 296                                   # ensemble = models with NLL <= the 80th percentile of the final population (296 of 370)
+ENS_PROP <- if(exists("ENS_PROP")) ENS_PROP else 0.80   # ensemble = models with NLL <= this quantile of the final population (296 of 370 at 0.80); N_ENS is computed below
 NREP  <- 15                                    # repeated random forests for the uncertainty of the shares
 pr  <- file.path(RUN, "plots_R"); dir.create(file.path(pr, "ts"), showWarnings = FALSE, recursive = TRUE)
 tag <- ""   # same file names whichever set of series is used
@@ -142,6 +142,7 @@ Gb$v   <- Gb$share / 100 * tot_pct["best"]                                      
 Gb$vm  <- Gb$share / 100 * tot_pct["mean"]; Gb$vlo <- Gb$share / 100 * tot_pct["lo"]; Gb$vhi <- Gb$share / 100 * tot_pct["hi"]   # bar = range of the ensemble members
 # parameters at a search bound: median position of the ensemble members in the outer 5% of the range (log scale when the range spans more than a factor of 20)
 pop_f <- read.csv(file.path(RUN, "results", "final_ga_popga01.csv"), check.names = FALSE); runs_f <- read.csv(file.path(RUN, "results", "final_ga_runs_ga01.csv"))
+N_ENS <- sum(runs_f$fitness <= quantile(runs_f$fitness, ENS_PROP))
 Xb <- as.matrix(pop_f[runs_f$gapop_row[order(runs_f$fitness)][seq_len(N_ENS)], par_tab$par]); Lb <- par_tab$L.bounds; Ub <- par_tab$U.bounds; lgb <- Ub / Lb > 20
 posb <- sapply(seq_along(par_tab$par), function(j) if(lgb[j]) (log(Xb[, j]) - log(Lb[j])) / (log(Ub[j]) - log(Lb[j])) else (Xb[, j] - Lb[j]) / (Ub[j] - Lb[j]))
 medb <- apply(posb, 2, median); edge_b <- tapply(medb < 0.05 | medb > 0.95, ptype[par_tab$par], sum)

@@ -6,7 +6,7 @@
 # calibration workflow lives here.
 #
 # Usage from a separate run script:
-#   source("/Users/daniel/Downloads/st_calibration_functions.R")
+#   source("<repo folder>/st_calibration_functions.R")
 #   ... your config (paths, ga_runs, etc.) and actual function calls go in that
 #   separate script, not here -- see st_calibration_run.R for a complete example.
 #
@@ -1572,10 +1572,10 @@ plot_ga_ensemble <- function(obs = NULL,
         } +
         { if(!is.null(init_df))
           ggplot2::geom_line(data = init_df, ggplot2::aes(x = year, y = value),
-                             color = "black", linewidth = 1.1, linetype = "22")
+                             color = "black", linewidth = 0.85, linetype = "22")
         } +
         ggplot2::geom_line(data = best_df, ggplot2::aes(x = year, y = value),
-                           color = "#20B2AA", linewidth = 1.1, linetype = "22") +
+                           color = "#20B2AA", linewidth = 0.85, linetype = "22") +
         { if(nrow(obs_df) > 0)
           ggplot2::geom_point(data = obs_df, ggplot2::aes(x = year, y = value, shape = series),
                               color = "black", size = 2.2)
@@ -1662,7 +1662,7 @@ compare_best_vs_ensemble_mean <- function(ga_runs, vars = c("Biomass", "Catch", 
   cols <- c("Baseline model" = "black", "Best model" = "#20B2AA", "Last-generation models (colour = NLL)" = "#B5367A")[labs_]
   lts  <- c("Baseline model" = "22", "Best model" = "22", "Last-generation models (colour = NLL)" = "solid")[labs_]
   src <- ggplot2::ggplot(d, ggplot2::aes(x = x, y = y, color = line, linetype = line)) +
-    ggplot2::geom_line(linewidth = 1.1) +
+    ggplot2::geom_line(linewidth = 0.85) +
     ggplot2::scale_color_manual(values = cols, name = NULL) +
     ggplot2::scale_linetype_manual(values = lts, name = NULL) +
     ggplot2::theme_void(base_size = base_size) +
@@ -2077,12 +2077,12 @@ plot_ga_ensemble_faceted <- function(obs = NULL,
                              linewidth = line_width, alpha = alpha)
         if(!is.null(sub_init) && nrow(sub_init) > 0)
           pp <- pp + ggplot2::geom_line(data = sub_init, ggplot2::aes(x = year, y = value),
-                                        color = "black", linewidth = 1.25, linetype = "22")
+                                        color = "black", linewidth = 0.85, linetype = "22")
         pp <- pp + ggplot2::geom_line(data = sub_best, ggplot2::aes(x = year, y = value),
-                                      color = "#20B2AA", linewidth = 1.25, linetype = "22")
+                                      color = "#20B2AA", linewidth = 0.85, linetype = "22")
         if(!is.null(sub_wmean))
           pp <- pp + ggplot2::geom_line(data = sub_wmean, ggplot2::aes(x = year, y = value),
-                                        color = "grey30", linewidth = 1.25, linetype = "solid")
+                                        color = "grey30", linewidth = 0.85, linetype = "solid")
         if(nrow(sub_obs) > 0)
           pp <- pp + ggplot2::geom_point(data = sub_obs, ggplot2::aes(x = year, y = value, shape = series),
                                          fill = "white", color = "black", size = 2.0, stroke = 0.8)
@@ -2179,7 +2179,7 @@ plot_ga_ensemble_faceted <- function(obs = NULL,
       # grouping variable (line) and labels.
       ref_legend_source <- ggplot2::ggplot(ref_legend_df,
                                            ggplot2::aes(x = x, y = y, color = line, linetype = line)) +
-        ggplot2::geom_line(linewidth = 1.1) +
+        ggplot2::geom_line(linewidth = 0.85) +
         ggplot2::scale_color_manual(values = ref_line_colors, name = NULL) +
         ggplot2::scale_linetype_manual(values = ref_line_linetypes, name = NULL) +
         ggplot2::theme_void() +
@@ -3927,6 +3927,7 @@ plot_region_timeseries_grid <- function(run_dir = NULL, init_run_dir = NULL, gro
                                         map_palette = "custom", map_show_land = TRUE,
                                         map_fixed_aspect = FALSE,
                                         extent_csv = NULL,   # path to an EcospaceMap*.csv export: its predicted cells are outlined on the map
+                                        member_lines_grey = FALSE,   # TRUE (ensemble_style = "ribbon"): also draw every ensemble member as a thin grey line behind the band, baseline and mean
                                         ribbon_probs = c(0.025, 0.975),   # lower / upper quantile of the ribbon (c(0.05, 0.95) = 90% interval across the selected models)
                                         plots_dir = "plots",
                                         png_file = NULL,
@@ -4229,32 +4230,38 @@ plot_region_timeseries_grid <- function(run_dir = NULL, init_run_dir = NULL, gro
                                     linewidth = 0.5, alpha = 0.55)
       if(nrow(sub_init) > 0)
         pp <- pp + ggplot2::geom_line(data = sub_init, ggplot2::aes(x = year, y = biomass_sum),
-                                      color = "black", linewidth = 1.4, linetype = "22")
+                                      color = "black", linewidth = 0.9, linetype = "22")
       if(nrow(sub_best) > 0)
         pp <- pp + ggplot2::geom_line(data = sub_best, ggplot2::aes(x = year, y = biomass_sum),
-                                      color = "#20B2AA", linewidth = 1.6, linetype = "22")
+                                      color = "#20B2AA", linewidth = 0.9, linetype = "22")
       pp <- pp + .nll_scale(fit_lim, palette)
     } else if(show_ensemble){
       # ONLY the AIC-weighted ensemble mean + its 95% CI ribbon -- both in the
       # region's own color, ribbon at low alpha for the uncertainty shading. init and
       # best-fit are deliberately NOT drawn in this mode (per request: only the
       # weighted mean and its surrounding uncertainty, nothing else).
+      if(member_lines_grey && !is.null(cand_region_df)){
+        sub_g <- cand_region_df[cand_region_df$region_id == rid, , drop = FALSE]
+        if(nrow(sub_g) > 0)
+          pp <- pp + ggplot2::geom_line(data = sub_g, ggplot2::aes(x = year, y = biomass_sum, group = run_folder),
+                                        colour = "grey55", linewidth = 0.3, alpha = 0.5)   # every ensemble member, behind the band
+      }
       if(!is.null(sub_ribbon) && nrow(sub_ribbon) > 0)
         pp <- pp + ggplot2::geom_ribbon(data = sub_ribbon,
                                         ggplot2::aes(x = year, ymin = pmax(lo, 0), ymax = hi),
                                         fill = this_color, alpha = 0.25, colour = NA)   # uncertainty of the retained models, in the region colour
       if(nrow(sub_init) > 0)
         pp <- pp + ggplot2::geom_line(data = sub_init, ggplot2::aes(x = year, y = biomass_sum),
-                                      color = "black", linewidth = 1.25, linetype = "22")
+                                      color = "black", linewidth = 0.9, linetype = "22")
       if(nrow(sub_ens) > 0)
         pp <- pp + ggplot2::geom_line(data = sub_ens, ggplot2::aes(x = year, y = biomass_sum),
-                                      color = this_color, linewidth = 1.8)   # ensemble mean: solid, region colour
+                                      color = this_color, linewidth = 1.2)   # ensemble mean: solid, region colour
     } else {
       if(nrow(sub_init) > 0)
         pp <- pp + ggplot2::geom_line(data = sub_init, ggplot2::aes(x = year, y = biomass_sum, linetype = "init"),
-                                      color = "black", linewidth = 1.4)
+                                      color = "black", linewidth = 0.9)
       pp <- pp + ggplot2::geom_line(data = sub_best, ggplot2::aes(x = year, y = biomass_sum, linetype = "best-fit"),
-                                    color = this_color, linewidth = 1.8)
+                                    color = this_color, linewidth = 1.2)
       pp <- pp + ggplot2::scale_linetype_manual(values = c("init" = "22", "best-fit" = "solid"), name = NULL)
     }
     pp <- pp + ggplot2::geom_point(data = sub_obs, ggplot2::aes(x = year, y = value, shape = series),
@@ -4344,6 +4351,7 @@ plot_region_timeseries_grid <- function(run_dir = NULL, init_run_dir = NULL, gro
     if(!is.null(domain_data)){
       domain_data$ens_mean_df <- domain_ens_mean_df
       domain_data$ribbon_df   <- domain_ribbon_df
+      if(member_lines_grey && !is.null(cand_domain_df)) domain_data$grey_cand_df <- cand_domain_df
       if(use_lines && !is.null(cand_domain_df)){
         domain_data$cand_df <- cand_domain_df; domain_data$fit_lim <- fit_lim; domain_data$palette <- palette
       }
@@ -4542,32 +4550,35 @@ plot_region_timeseries_grid <- function(run_dir = NULL, init_run_dir = NULL, gro
                                   linewidth = 0.5, alpha = 0.55)
     if(nrow(sub_init) > 0)
       pp <- pp + ggplot2::geom_line(data = sub_init, ggplot2::aes(x = year, y = value),
-                                    color = "black", linewidth = 1.4, linetype = "22")
+                                    color = "black", linewidth = 0.9, linetype = "22")
     if(nrow(sub_best) > 0)
       pp <- pp + ggplot2::geom_line(data = sub_best, ggplot2::aes(x = year, y = value),
-                                    color = "#20B2AA", linewidth = 1.6, linetype = "22")
+                                    color = "#20B2AA", linewidth = 0.9, linetype = "22")
     pp <- pp + .nll_scale(domain_data$fit_lim, domain_data$palette)
   } else if(show_ensemble && !is.null(ens_mean_df)){
     # ONLY the AIC-weighted domain-wide mean + its 95% CI ribbon -- black, since this
     # panel has no region-specific color the way individual region panels do. init
     # and best-fit are deliberately NOT drawn here, matching the per-region panels'
     # "ensemble mode shows only the weighted mean and its uncertainty" convention.
+    if(!is.null(domain_data$grey_cand_df))
+      pp <- pp + ggplot2::geom_line(data = domain_data$grey_cand_df, ggplot2::aes(x = year, y = biomass_sum, group = run_folder),
+                                    colour = "grey55", linewidth = 0.3, alpha = 0.5)
     if(!is.null(ribbon_df) && nrow(ribbon_df) > 0)
       pp <- pp + ggplot2::geom_ribbon(data = ribbon_df,
                                       ggplot2::aes(x = year, ymin = pmax(lo, 0), ymax = hi),
                                       fill = "black", alpha = 0.20, colour = NA)
     if(nrow(sub_init) > 0)
       pp <- pp + ggplot2::geom_line(data = sub_init, ggplot2::aes(x = year, y = value),
-                                    color = "black", linewidth = 1.25, linetype = "22")
+                                    color = "black", linewidth = 0.9, linetype = "22")
     if(nrow(ens_mean_df) > 0)   # ensemble mean solid (domain-wide panel has no region colour -> black), same convention as the region panels
       pp <- pp + ggplot2::geom_line(data = ens_mean_df, ggplot2::aes(x = year, y = value),
-                                    color = "black", linewidth = 1.8)
+                                    color = "black", linewidth = 1.2)
   } else {
     if(nrow(sub_init) > 0)
       pp <- pp + ggplot2::geom_line(data = sub_init, ggplot2::aes(x = year, y = value, linetype = "init"),
-                                    color = "black", linewidth = 1.4)
+                                    color = "black", linewidth = 0.9)
     pp <- pp + ggplot2::geom_line(data = sub_best, ggplot2::aes(x = year, y = value, linetype = "best-fit"),
-                                  color = "black", linewidth = 1.8)
+                                  color = "black", linewidth = 1.2)
     pp <- pp + ggplot2::scale_linetype_manual(values = c("init" = "22", "best-fit" = "solid"), name = NULL)
   }
   if(!is.null(obs_df)){

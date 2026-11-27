@@ -12,10 +12,10 @@
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 ## ---- PATHS ---------------------------------------------------------------------------------
-RUN       <- Sys.getenv("EWE_RUN",  "/Users/daniel/Work/ST_calibration/phase6_ga01")       # ONE folder: inputs/, output/, results/, sens1/, plots_R/
+RUN       <- Sys.getenv("EWE_RUN",  file.path(path.expand("~"), "Work/ST_calibration/phase6_ga01"))       # ONE folder: inputs/, output/, results/, sens1/, plots_R/
 LABEL     <- "ga01"
-REPO_DIR  <- Sys.getenv("EWE_REPO", "/Users/daniel/Documents/GitHub/personal/EwE_ST_calibration")   # functions + masks
-OLD_BASE  <- Sys.getenv("EWE_BASE", "/Users/daniel/Work/ST_calibration")                   # only for maxn/ rasters (shared, top level)
+REPO_DIR  <- Sys.getenv("EWE_REPO", file.path(path.expand("~"), "Documents/GitHub/personal/EwE_ST_calibration"))   # functions + masks
+OLD_BASE  <- Sys.getenv("EWE_BASE", file.path(path.expand("~"), "Work/ST_calibration"))                   # only for maxn/ rasters (shared, top level)
 SENS_XLSX <- file.path(RUN, "sens1", "LL_rescored.xlsx")
 PARVEC    <- file.path(RUN, "results", "parvec_ga01.csv")           # per-parameter GA bounds
 
@@ -285,6 +285,16 @@ region_ts <- plot_region_timeseries_grid(
   ens_mode = "quantile", keep_fitness_quantile = ENS_PROP, ribbon_probs = c(0, 1),   # ensemble = NLL at or below the ENS_PROP quantile; band = range of all ensemble members (min to max)
   ensemble_max_folders = N_CAND, plots_dir = file.path(PLOTS, "ts"))
 print(table(region_ts$run, region_ts$region_id))   # an "init" row per region = baseline is drawn
+
+# same figure with every ensemble member as a thin grey line behind the band (extra supplementary version; re-reads the ensemble maps)
+region_ts_members <- plot_region_timeseries_grid(
+  ga_runs = ga_runs, species_pattern = "gag 0", init_run_dir = BASE_RUN,
+  region_mask = age0_regions, region_attributes = region_attrs, obs = obs,
+  domain_obs_pattern = "FWCNMFS", map_show_land = TRUE,
+  extent_csv = file.path(BASE_RUN, "EcospaceMapBiomass-gag 0.csv"),
+  show_ensemble = TRUE, ensemble_style = "ribbon", member_lines_grey = TRUE, png_file = "region_timeseries_gag_0_members.png",
+  ens_mode = "quantile", keep_fitness_quantile = ENS_PROP, ribbon_probs = c(0, 1),
+  ensemble_max_folders = N_CAND, plots_dir = file.path(PLOTS, "ts"))
 
 ## ---- supplement: sensitivity of the ensemble band to the NLL-quantile cut-off ----
 local(source(file.path(REPO_DIR, "fig ensemble threshold sensitivity phase6.R"), local = TRUE))
